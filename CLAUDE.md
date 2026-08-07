@@ -201,10 +201,16 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 - KIS 브로커 연동은 **보류** — 주식(-01) 모의계좌는 1인 1개 한도인데 SwingETF가
   사용 중. 발급받은 선물옵션(-03) 모의계좌(60047447)는 주식/ETF 현물 주문 불가.
   `.env`의 키는 유효 확인됨(토큰 발급 성공) — 향후 연동 시 재사용.
-- 섀도 트래킹 자동화: crontab 등록됨 (평일 08:30 morning / 16:20 evening,
-  `scripts/daily_paper.sh`, 로그는 `paper/logs/`). crontab 스냅샷 관례에 따라
+- 섀도 트래킹 자동화: crontab 등록됨 (로그는 `paper/logs/`). crontab 스냅샷 관례에 따라
   `/home/user/Project/SwingETF/scripts/crontab.snapshot`에도 동일 라인 반영됨.
-  WSL이 꺼져 있으면 cron이 안 돌므로, 놓친 날은 다음 evening 실행이 자동 소급 기록.
+  - **아침**: `scripts/run_morning_catchup.sh` 를 평일 08:30~09:55 사이 5분 간격 호출.
+    하루 첫 **성공** 후 스탬프(`paper/logs/.morning_done`)로 나머지를 건너뛴다.
+    이유: WSL 부팅이 08:30 이후인 날이 상례라(08-04 09:35 / 08-05 09:02 / 08-06 08:38 /
+    08-07 08:36) 정시 1회 크론은 거의 매일 유실된다 — 실제로 2026-08-07 유실 발생.
+    스탬프를 로그 문자열이 아니라 종료코드로 찍는 이유는 `daily_paper.sh`가 헤더를
+    먼저 로그에 적기 때문 — 로그 매칭 방식은 실패한 실행을 완료로 오인한다.
+  - **저녁**: 평일 16:20 `scripts/daily_paper.sh evening` (캐치업 불필요 — 리플레이
+    방식이라 놓친 날을 다음 실행이 자동 소급 기록. 아침 프리뷰만 그날 못 보면 사라진다).
 
 ## 포워드 페이퍼 테스트 (paper)
 

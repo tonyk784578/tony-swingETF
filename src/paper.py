@@ -109,13 +109,25 @@ def forward_summary(masters: dict[str, pd.DataFrame], ledger: pd.DataFrame) -> p
 
 
 def preview(data: dict[str, pd.DataFrame]) -> None:
-    """다음 거래일 기준 조건 발동 여부 미리보기 (갭 조건은 개장 시 확정)."""
+    """다음 거래일 기준 조건 발동 여부 미리보기 (갭 조건은 개장 시 확정).
+
+    장부(update_ledger)와 동일하게 confirmed_cutoff를 적용한다. 이게 없으면
+    장중에 실행했을 때 미완성 당일 봉으로 조건을 평가해 실제와 다른 값이 찍힌다
+    (아침 캐치업이 개장 후에 도는 날이 있으므로 실제로 발생하는 경로다).
+    """
+    from .data_loader import confirmed_cutoff
+
     scfg = load_config()["signals"]
     pcfg = load_config()["paper"]
+    cutoff = confirmed_cutoff()
 
     latest: dict[str, tuple[float, pd.Timestamp]] = {}
     for name, key in [("SOX", "sox"), ("NVDA", "nvda"), ("KOSPI", "kospi")]:
         ret = data[name]["Close"].pct_change().dropna()
+        ret = ret[ret.index <= cutoff]
+        if ret.empty:
+            print(f"  [{name}] 확정 봉 없음 — 프리뷰 생략")
+            return
         latest[key] = (float(ret.iloc[-1]), ret.index[-1])
 
     print("=== paper preview — 최신 확정 데이터 기준 ===")
@@ -125,6 +137,7 @@ def preview(data: dict[str, pd.DataFrame]) -> None:
     for item in pcfg["conditions"]:
         stock, cond = item["stock"], item["condition"]
         closes = data[stock]["Close"]
+        closes = closes[closes.index <= cutoff]
         above = bool(closes.iloc[-1] > closes.rolling(20).mean().iloc[-1])
         parts = []
         armed = True
