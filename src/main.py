@@ -26,9 +26,16 @@ def cmd_download(force: bool) -> None:
     from .data_loader import load_symbol
 
     data = load_all(force)
-    # ETF Stage 2 후보도 함께 갱신 — 저녁 cron의 ETF 장부가 최신 봉을 보도록
-    for cand in load_config()["etf_paper"]["candidates"]:
-        load_symbol(str(cand["code"]), "kr", force)
+    cfg = load_config()
+    # ETF Stage 2 후보 + 확장 로테이션 유니버스도 함께 갱신 — 저녁 cron의
+    # ETF 장부·로테이션 리플레이가 최신 봉을 보도록
+    codes = {str(cand["code"]) for cand in cfg["etf_paper"]["candidates"]}
+    if cfg.get("etf_rotation2", {}).get("freeze"):
+        from .rotation import rotation2_universe
+
+        codes |= set(rotation2_universe())
+    for code in sorted(codes):
+        load_symbol(code, "kr", force)
     print(summarize(data))
 
 
@@ -223,6 +230,21 @@ def cmd_etf(force: bool) -> None:
     print(f"\nStage-2 후보 (N>=30, 전/후반 양수, t>=2): {len(passed)}개")
     print("report:", RESULTS_DIR / "etf_screening.md")
 
+    from .etf_swing import run_ext_screening
+
+    ext = run_ext_screening(force)
+    if ext is not None:
+        print(f"\n=== 확장 유니버스 스크리닝 (신자산 x 생존 계열, {len(ext)}조합) ===")
+        print(ext[ext["rankable"]][["etf", "strategy", "n", "avg_hold", "mean", "win",
+                                    "cum", "mdd", "t_stat", "sign_holds"]]
+              .to_string(index=False,
+                         formatters={"avg_hold": "{:.1f}".format, "mean": pct,
+                                     "win": "{:.1%}".format, "cum": "{:+.1%}".format,
+                                     "mdd": "{:.1%}".format, "t_stat": "{:.2f}".format}))
+        ext_pass = ext[ext["rankable"] & ext["sign_holds"] & (ext["t_stat"] >= 2)]
+        print(f"확장 통과 (게이트 동일): {len(ext_pass)}개")
+        print("report:", RESULTS_DIR / "etf_ext_screening.md")
+
 
 def cmd_portfolio(force: bool) -> None:
     from .portfolio import run_portfolio
@@ -258,21 +280,27 @@ def cmd_refine(force: bool) -> None:
     print("\nreport:", RESULTS_DIR / "refinements.md")
 
 
-def cmd_rotation(force: bool) -> None:
-    from .rotation import run_rotation
-
-    res = run_rotation(force)
+def _print_rotation(tag: str, res: dict) -> None:
     v = res["verdict"]
     for label, st in [("전체", v["full"]), ("전반", v["first"]), ("후반", v["second"])]:
-        print(f"{label}: N={st['n']}  평균 {st['mean']:+.3%}  승률 {st['win_rate']:.1%}  "
-              f"t {st['t_stat']:.2f}")
-    print(f"판정(Stage 1 기준): {'통과' if v['passed'] else '기각'}")
-    print(f"계좌: CAGR {res['stats']['cagr']:+.2%}  MDD {res['stats']['mdd']:.1%}  "
+        print(f"  {label}: N={st['n']}  평균 {st['mean']:+.3%}  "
+              f"승률 {st['win_rate']:.1%}  t {st['t_stat']:.2f}")
+    print(f"  판정(Stage 1 기준): {'통과' if v['passed'] else '기각'}")
+    print(f"  계좌: CAGR {res['stats']['cagr']:+.2%}  MDD {res['stats']['mdd']:.1%}  "
           f"Sharpe {res['stats']['sharpe']:.2f}  "
           f"(KODEX200 B&H: {res['bench']['cagr']:+.2%} / {res['bench']['mdd']:.1%} / "
           f"{res['bench']['sharpe']:.2f})")
-    print("현재 시그널:", ", ".join(res["now_target"]) or "현금")
-    print("report:", RESULTS_DIR / "rotation.md")
+    print("  현재 시그널:", ", ".join(res["now_target"]) or "현금")
+    print("  report:", RESULTS_DIR / f"{tag}.md")
+
+
+def cmd_rotation(force: bool) -> None:
+    from .rotation import run_rotation, run_rotation2
+
+    print("=== 실험 1: 기존 12종 (2026-08-07 기각 — 재현) ===")
+    _print_rotation("rotation", run_rotation(force))
+    print("\n=== 실험 2: 확장 유니버스 — 자산군 다변화, 파생형 제외 ===")
+    _print_rotation("rotation2", run_rotation2(force))
 
 
 def cmd_crash(force: bool) -> None:

@@ -159,7 +159,8 @@ def iter_candidates(force: bool = False, cutoff: pd.Timestamp | None = None,
         yield cand, df, entry, exit_, max_hold, trailing
 
 
-def run_screening(force: bool = False) -> pd.DataFrame:
+def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataFrame:
+    """유니버스 x 전략 스크리닝 공용 루프 — 본 스크리닝과 확장 스크리닝이 공유."""
     from .data_loader import confirmed_cutoff
 
     cfg = load_config()
@@ -170,12 +171,12 @@ def run_screening(force: bool = False) -> pd.DataFrame:
 
     nasdaq = load_symbol("^IXIC", "us", force)
     rows = []
-    for code, name in ecfg["universe"].items():
+    for code, name in universe.items():
         df = load_symbol(str(code), "kr", force)
         df = df[df.index <= cut]  # 장중 실행 시 당일 미완성 봉 제외
         us_mapped = map_us_to_kr(us_returns(nasdaq), df.index, "ixic")["ixic"]
         bh = df["Close"].iloc[-1] / df["Close"].iloc[0] - 1
-        for strat in ecfg["strategies"]:
+        for strat in strategies:
             entry, exit_, max_hold = build_flags(df, strat, us_mapped)
             trades = simulate(df, entry, exit_, max_hold, cost)
             if trades.empty:
@@ -195,10 +196,26 @@ def run_screening(force: bool = False) -> pd.DataFrame:
                                    and st_first["mean"] > 0 and st_second["mean"] > 0),
                 "rankable": st["n"] >= ecfg["min_trades"],
             })
-    out = (pd.DataFrame(rows)
-           .sort_values("t_stat", ascending=False).reset_index(drop=True))
+    return (pd.DataFrame(rows)
+            .sort_values("t_stat", ascending=False).reset_index(drop=True))
+
+
+def run_screening(force: bool = False) -> pd.DataFrame:
+    ecfg = load_config()["etf"]
+    out = _screen_rows(ecfg["universe"], list(ecfg["strategies"]), force)
     out.to_csv(RESULTS_DIR / "etf_screening.csv", index=False, encoding="utf-8-sig")
     _write_report(out)
+    return out
+
+
+def run_ext_screening(force: bool = False) -> pd.DataFrame | None:
+    """확장 유니버스 x 생존 계열 스크리닝 (2026-08-07 사전 등록 — 게이트 동일)."""
+    ecfg = load_config()["etf"]
+    if not ecfg.get("universe_ext"):
+        return None
+    out = _screen_rows(ecfg["universe_ext"], list(ecfg["ext_strategies"]), force)
+    out.to_csv(RESULTS_DIR / "etf_ext_screening.csv", index=False, encoding="utf-8-sig")
+    _write_ext_report(out)
     return out
 
 
@@ -225,3 +242,27 @@ def _write_report(df: pd.DataFrame) -> None:
         lines.append("| (통과 후보 없음) | | | | | | | | | | |")
     lines.append("\n전체 표는 `etf_screening.csv` (t-stat 내림차순).")
     (RESULTS_DIR / "etf_screening.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_ext_report(df: pd.DataFrame) -> None:
+    cfg = load_config()["etf"]
+    top = df[df["rankable"] & df["sign_holds"] & (df["t_stat"] >= 2)]
+    lines = [f"""# 확장 유니버스 스크리닝 (2026-08-07 사전 등록)
+
+생성일: {pd.Timestamp.today().date()} | 신자산 {len(cfg['universe_ext'])}종 x
+생존 계열 {len(cfg['ext_strategies'])}전략 = {len(df)}조합 | 종결 계열은 재시험 안 함
+
+## 통과 후보 (N >= {cfg['min_trades']}, 전/후반 모두 양수, t >= 2 — 전부 Stage 2 등록)
+
+| ETF | 전략 | N | 평균보유 | 평균 | 승률 | 누적 | MDD | t | 전반 | 후반 |
+|---|---|---|---|---|---|---|---|---|---|---|"""]
+    for _, r in top.iterrows():
+        lines.append(f"| {r['etf']} | {r['strategy']} | {r['n']} | {r['avg_hold']:.1f}일 "
+                     f"| {r['mean']:+.3%} | {r['win']:.1%} | {r['cum']:+.1%} "
+                     f"| {r['mdd']:.1%} | {r['t_stat']:.2f} "
+                     f"| {r['first_mean']:+.3%} | {r['second_mean']:+.3%} |")
+    if top.empty:
+        lines.append("| (통과 후보 없음) | | | | | | | | | | |")
+    lines.append("\n전체 표는 `etf_ext_screening.csv` (t-stat 내림차순).")
+    (RESULTS_DIR / "etf_ext_screening.md").write_text("\n".join(lines) + "\n",
+                                                      encoding="utf-8")

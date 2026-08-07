@@ -127,6 +127,12 @@ def verdict_readiness() -> None:
                                          & (etf_led["strategy"] == cand["strategy"])).sum())
         print(f"    후보별(실거래 판정) {cand['name']} {cand['strategy']}: {n}/{cand_need}"
               + ("  ← 실거래 채택 판정 가능" if n >= cand_need else ""))
+    r2 = cfg.get("etf_rotation2", {})
+    if r2.get("freeze"):
+        n_rot = 0 if etf_led.empty else int((etf_led["strategy"] == "rotation2").sum())
+        need_rot = r2.get("judgment_min", cand_need)
+        print(f"    확장 로테이션 rotation2 에피소드: {n_rot}/{need_rot}"
+              + ("  ← 판정 가능" if n_rot >= need_rot else ""))
 
     try:
         from .align import build_master

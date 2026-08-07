@@ -70,6 +70,8 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
                        "insample_mean": insample["mean"] if insample else float("nan"),
                        "open_pos": open_pos})
 
+    status += _rotation2_rows(cfg, ledger, new_rows, force)
+
     if new_rows:
         ledger = pd.concat([ledger, pd.DataFrame(new_rows)], ignore_index=True)
         ledger = ledger.sort_values(["entry_date", "name"]).reset_index(drop=True)
@@ -77,19 +79,50 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
     return ledger, len(new_rows), status
 
 
+def _rotation2_rows(cfg: dict, ledger: pd.DataFrame, new_rows: list,
+                    force: bool) -> list[dict]:
+    """확장 로테이션(Stage 2, 2026-08-07 통과·편입) 완결 에피소드 append + 상태."""
+    r2 = cfg.get("etf_rotation2", {})
+    if not r2.get("freeze"):
+        return []
+    from .rotation import rotation2_episodes
+
+    ep, open_pos, _ = rotation2_episodes(force)
+    freeze = pd.Timestamp(r2["freeze"])
+    insample = combo_stats(ep[ep["entry_date"] < freeze]["net_ret"]) if len(ep) else None
+    fwd = ep[ep["entry_date"] > freeze] if len(ep) else ep
+    sub = ledger[ledger["strategy"] == "rotation2"] if not ledger.empty else ledger
+    done = set(zip(sub["name"], sub["entry_date"], strict=True)) if len(sub) else set()
+    for _, t in fwd.iterrows():
+        if (t["name"], t["entry_date"]) in done:
+            continue
+        new_rows.append({"entry_date": t["entry_date"], "exit_date": t["exit_date"],
+                         "name": t["name"], "strategy": "rotation2",
+                         "hold": t["hold"], "net_ret": round(t["net_ret"], 6)})
+    pos_text = (", ".join(f"{p['name']}({p['unrealized']:+.1%})" for p in open_pos)
+                if open_pos else "전 슬롯 현금")
+    return [{"name": "(포트폴리오)", "strategy": "rotation2",
+             "insample_mean": insample["mean"] if insample else float("nan"),
+             "open_pos": None, "position_text": f"보유 {pos_text}"}]
+
+
 def etf_forward_summary(ledger: pd.DataFrame, status: list[dict]) -> pd.DataFrame:
     rows = []
     for st in status:
-        sub = ledger[(ledger["name"] == st["name"])
-                     & (ledger["strategy"] == st["strategy"])]
+        if st["name"] == "(포트폴리오)":   # rotation2 — 에피소드가 ETF명으로 기록됨
+            sub = ledger[ledger["strategy"] == st["strategy"]]
+        else:
+            sub = ledger[(ledger["name"] == st["name"])
+                         & (ledger["strategy"] == st["strategy"])]
         fs = combo_stats(sub["net_ret"]) if len(sub) else combo_stats(pd.Series([], dtype=float))
         pos = st["open_pos"]
         rows.append({
             "name": st["name"], "strategy": st["strategy"],
             "fwd_n": fs["n"], "fwd_mean": fs["mean"], "fwd_cum": fs["cum_ret"],
             "insample_mean": st["insample_mean"],
-            "position": (f"보유 {pos['hold']}일째 ({pos['unrealized']:+.2%})"
-                         if pos else "무포지션"),
+            "position": st.get("position_text")
+            or (f"보유 {pos['hold']}일째 ({pos['unrealized']:+.2%})"
+                if pos else "무포지션"),
         })
     return pd.DataFrame(rows)
 
@@ -126,3 +159,35 @@ def preview_etf(force: bool = False) -> None:
         else:
             state = "무포지션 · 신호 없음"
         print(f"  [{cand['name']}] {cand['strategy']}: {state}")
+
+    _preview_rotation2(force)
+
+
+def _preview_rotation2(force: bool = False) -> None:
+    """확장 로테이션 아침 상태: 보유 슬롯 + 리밸런스 임박 여부(월초 근사)."""
+    cfg = load_config()
+    if not cfg.get("etf_rotation2", {}).get("freeze"):
+        return
+    from .rotation import rotation2_episodes, rotation2_universe, select_targets
+
+    _, open_pos, idx = rotation2_episodes(force)
+    held = ", ".join(f"{p['name']}({p['unrealized']:+.1%})" for p in open_pos) or "현금"
+    # 마지막 확정 봉이 그 달의 월말이면(=오늘이 다음 달 첫 거래일이면) 오늘 리밸런스
+    rebalance_today = idx[-1].month != pd.Timestamp.today().month
+    line = f"  [로테이션] rotation2: 보유 {held}"
+    if rebalance_today:
+        from .data_loader import load_symbol
+        r2 = cfg["etf_rotation2"]
+        closes = {n: load_symbol(str(c), "kr").loc[:idx[-1], "Close"]
+                  for c, n in rotation2_universe().items()}
+        closes = pd.DataFrame(closes)
+        mom = (closes / closes.shift(r2["lookback"]) - 1).iloc[-1]
+        target = select_targets(mom, r2["top_k"])
+        cur = {p["name"] for p in open_pos}
+        moves = []
+        if target - cur:
+            moves.append("IN " + ", ".join(sorted(target - cur)))
+        if cur - target:
+            moves.append("OUT " + ", ".join(sorted(cur - target)))
+        line += " · 오늘 시가 리밸런스: " + ("; ".join(moves) or "변경 없음")
+    print(line)

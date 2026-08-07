@@ -84,6 +84,24 @@ etf:
     "091170": KODEX_Bank
     "102970": KODEX_Securities
     "091180": KODEX_Auto
+  universe_ext:
+    # 확장 유니버스 (2026-08-07 사전 등록) — 로테이션 기각 원인(횡단면 분산 부족)
+    # 해소 + 생존 스윙 계열의 신자산군 적용. 선정 기준(성과 미참조 — 사전 고정):
+    # 기존 유니버스에 없는 자산군마다 '역사가 충분한(가급적 2016 이전 상장) 대표
+    # 유동성 상품 1개'. 데이터 시작은 어차피 data.start(2015) 캡. 데이터 가용성
+    # 실패 시에만 동급 상품으로 대체하고 사유를 기록한다.
+    "143850": TIGER_SP500H      # 미국 대형주 (S&P500 선물, 환헤지, 2011 상장)
+    "099140": KODEX_ChinaH      # 중국 H주 (2007 상장)
+    "101280": KODEX_Japan       # 일본 TOPIX100 (2008 상장)
+    "148070": KOSEF_KTB10Y      # 국고채 10년 (2011 상장) — 방어 자산축
+    "304660": KODEX_UST30YH     # 미국채 울트라30년 (환헤지, 2018 상장) — 위기 헤지
+    "261240": KODEX_USD         # 미국달러선물 (2016 상장) — 원화 약세 헤지
+    "130680": TIGER_OilH        # 원유선물 (환헤지, 2010 상장) — 원자재축
+    "329200": TIGER_REITs       # 리츠/인프라 (2019 상장) — 부동산축
+  # 확장 스크리닝(2026-08-07 사전 등록): 신자산 8종 x 생존 계열 3전략 = 24테스트.
+  # 종결된 계열(rsi2/pullback/us_dip)은 신자산에도 재시험하지 않는다.
+  # 게이트는 Stage 1과 동일. 통과분 전부(사후 선별 없음) Stage 2 후보 등록.
+  ext_strategies: [breakout, macross, trend_ride]
   strategies:
     breakout:               # 추세추종: 20일 신고가 돌파 매수, MA10 이탈 청산
       lookback: 20
@@ -136,6 +154,23 @@ etf_rotation:
   lookback: 252
   top_k: 3
 
+etf_rotation2:
+  # 확장 로테이션 (2026-08-07 사전 등록 — 기각된 rotation의 유일한 재도전 경로).
+  # 가설: rotation 실패 원인은 유니버스의 횡단면 분산 부족 — 자산군 다변화
+  #   (주식 KR/US/CN/JP, 채권 KR/US, 달러, 원유, 금, 리츠)면 듀얼 모멘텀이 성립한다.
+  # 유니버스: universe + universe_ext 에서 파생형(레버리지·인버스) 제외 —
+  #   정통 자산군 로테이션은 무레버리지 기초자산을 쓴다 (사전 원칙, 성과 미참조).
+  # 파라미터는 rotation과 동일 표준값 고정, 판정도 동일(N>=30, 전/후반 양수, t>=2).
+  # 기각 시 로테이션 프로그램 종료 — 추가 유니버스 변형 재시도 금지.
+  exclude: ["122630", "233740", "114800"]
+  lookback: 252
+  top_k: 3
+  # Stage 2 편입 (2026-08-07 — 인샘플 통과 t=2.40): freeze 이후 진입 에피소드만
+  # 아웃오브샘플로 etf_ledger.csv(strategy=rotation2)에 축적. 판정은 완결 에피소드
+  # judgment_min 건 도달 시(과거 6.7건/년 → 약 3년). 그 전 실거래 금지.
+  freeze: "2026-08-07"
+  judgment_min: 20
+
 etf_paper:
   # Stage 2 사전 등록 (2026-08-06 동결) — Stage 1 스크리닝 통과 후보 4개.
   # freeze_date 이후 진입분만 아웃오브샘플. 후보 변경 시 freeze 갱신, ledger 보존.
@@ -165,6 +200,9 @@ etf_paper:
     # 3.8~6.2건/년 → 후보별 20건 판정까지 약 3.2~5.3년 (장기 관측 전제).
     - {code: "069500", name: KODEX200, strategy: trend_ride, freeze: "2026-08-07"}
     - {code: "133690", name: TIGER_NASDAQ100, strategy: trend_ride, freeze: "2026-08-07"}
+    # 확장 스크리닝 통과분 (2026-08-07 등록 — 신자산 8종 x 생존 3계열 중 유일 통과.
+    # 채권축이라 기존 주식 후보와 상관 낮음. t=2.04, MDD -2.2%)
+    - {code: "148070", name: KOSEF_KTB10Y, strategy: trend_ride, freeze: "2026-08-07"}
 
 portfolio:
   # 포트폴리오 시뮬레이션 규칙 (2026-08-06 등록)

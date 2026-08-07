@@ -17,18 +17,16 @@ from .config import RESULTS_DIR, load_config
 from .data_loader import confirmed_cutoff, load_symbol
 
 
-def _wide_frames(force: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """유니버스 전체의 (opens, closes) 와이드 프레임 — 상장 전 구간은 NaN."""
-    cfg = load_config()
+def _wide_frames(universe: dict, force: bool = False
+                 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """유니버스의 (opens, closes) 와이드 프레임 — 상장 전 구간은 NaN."""
     cut = confirmed_cutoff()
     opens, closes = {}, {}
-    names = {}
-    for code, name in cfg["etf"]["universe"].items():
+    for code, name in universe.items():
         df = load_symbol(str(code), "kr", force)
         df = df[df.index <= cut]
         opens[name], closes[name] = df["Open"], df["Close"]
-        names[str(code)] = name
-    return pd.DataFrame(opens), pd.DataFrame(closes), names
+    return pd.DataFrame(opens), pd.DataFrame(closes)
 
 
 def month_end_days(index: pd.DatetimeIndex) -> list[pd.Timestamp]:
@@ -78,9 +76,10 @@ def simulate_rotation(opens: pd.DataFrame, closes: pd.DataFrame, lookback: int,
             positions[name] = {"entry_date": e, "entry_price": px}
 
     ep = pd.DataFrame(episodes)
+    last_close = closes.ffill().iloc[-1]   # 캐시 지연 종목은 마지막 유효 종가로 평가
     open_pos = [{"name": n, "entry_date": p["entry_date"],
                  "entry_price": p["entry_price"],
-                 "unrealized": closes[n].iloc[-1] / p["entry_price"] - 1}
+                 "unrealized": last_close[n] / p["entry_price"] - 1}
                 for n, p in positions.items()]
 
     # 일별 MTM (슬롯 비중 1/3 고정): 진입일 Close/Open, 이후 Close/Close,
@@ -117,15 +116,14 @@ def _gate(ep: pd.DataFrame, boundary: pd.Timestamp) -> dict:
     return {"full": full, "first": first, "second": second, "passed": passed}
 
 
-def run_rotation(force: bool = False) -> dict:
+def _run_experiment(universe: dict, lookback: int, top_k: int, out_prefix: str,
+                    title: str, force: bool = False) -> dict:
     cfg = load_config()
-    rcfg = cfg["etf_rotation"]
     cost = cfg["etf"]["cost_round_trip"]
     boundary = pd.Timestamp(cfg["split"]["boundary"])
 
-    opens, closes, _ = _wide_frames(force)
-    ep, open_pos, daily = simulate_rotation(opens, closes, rcfg["lookback"],
-                                            rcfg["top_k"], cost)
+    opens, closes = _wide_frames(universe, force)
+    ep, open_pos, daily = simulate_rotation(opens, closes, lookback, top_k, cost)
     verdict = _gate(ep, boundary)
 
     equity = (1 + daily).cumprod()
@@ -143,24 +141,61 @@ def run_rotation(force: bool = False) -> dict:
         "sharpe": bh.mean() / bh.std() * (252 ** 0.5),
     }
     # 현재 시그널 상태 (기술적 표시 — 다음 월말 리밸런스 대상 아님에 유의)
-    mom_now = (closes / closes.shift(rcfg["lookback"]) - 1).iloc[-1]
-    now_target = sorted(select_targets(mom_now, rcfg["top_k"]))
+    mom_now = (closes / closes.shift(lookback) - 1).iloc[-1]
+    now_target = sorted(select_targets(mom_now, top_k))
 
-    ep.to_csv(RESULTS_DIR / "rotation_episodes.csv", index=False, encoding="utf-8-sig")
-    _write_report(ep, open_pos, verdict, stats, bench, now_target, rcfg)
+    ep.to_csv(RESULTS_DIR / f"{out_prefix}_episodes.csv", index=False,
+              encoding="utf-8-sig")
+    _write_report(ep, open_pos, verdict, stats, bench, now_target,
+                  lookback, top_k, out_prefix, title)
     return {"episodes": ep, "open_pos": open_pos, "verdict": verdict,
             "stats": stats, "bench": bench, "now_target": now_target}
 
 
+def run_rotation(force: bool = False) -> dict:
+    """실험 1 (2026-08-07 등록·기각 — 재현용): 기존 12종 유니버스."""
+    cfg = load_config()
+    rcfg = cfg["etf_rotation"]
+    return _run_experiment(cfg["etf"]["universe"], rcfg["lookback"], rcfg["top_k"],
+                           "rotation", "듀얼 모멘텀 로테이션", force)
+
+
+def rotation2_universe() -> dict:
+    """확장 로테이션 유니버스: universe + universe_ext − 파생형(레버리지·인버스)."""
+    cfg = load_config()
+    excl = {str(c) for c in cfg["etf_rotation2"]["exclude"]}
+    uni = {**cfg["etf"]["universe"], **cfg["etf"]["universe_ext"]}
+    return {c: n for c, n in uni.items() if str(c) not in excl}
+
+
+def run_rotation2(force: bool = False) -> dict:
+    """실험 2 (2026-08-07 등록·통과): 확장 유니버스, 파생형 제외."""
+    r2 = load_config()["etf_rotation2"]
+    return _run_experiment(rotation2_universe(), r2["lookback"], r2["top_k"],
+                           "rotation2", "확장 듀얼 모멘텀 로테이션 (자산군 다변화)", force)
+
+
+def rotation2_episodes(force: bool = False
+                       ) -> tuple[pd.DataFrame, list[dict], pd.DatetimeIndex]:
+    """섀도용 리플레이 — 산출물 파일 없이 (에피소드, 미청산, 캘린더)만 반환."""
+    cfg = load_config()
+    r2 = cfg["etf_rotation2"]
+    opens, closes = _wide_frames(rotation2_universe(), force)
+    ep, open_pos, _ = simulate_rotation(opens, closes, r2["lookback"], r2["top_k"],
+                                        cfg["etf"]["cost_round_trip"])
+    return ep, open_pos, closes.index
+
+
 def _write_report(ep: pd.DataFrame, open_pos: list, verdict: dict, stats: dict,
-                  bench: dict, now_target: list, rcfg: dict) -> None:
+                  bench: dict, now_target: list, lookback: int, top_k: int,
+                  out_prefix: str, title: str) -> None:
     v = verdict
     freq = ep.groupby("name")["net_ret"].agg(["size", "sum"]).sort_values("size",
                                                                           ascending=False)
-    lines = [f"""# 듀얼 모멘텀 로테이션 (사전 등록 2026-08-07 — 1회 실행 판정)
+    lines = [f"""# {title} (사전 등록 2026-08-07 — 1회 실행 판정)
 
-생성일: {pd.Timestamp.today().date()} | 규칙: 월말 {rcfg['lookback']}일 모멘텀 상위
-{rcfg['top_k']}종(절대 모멘텀>0) 익일 시가 동일비중 리밸런스 | 비용 왕복 0.1%
+생성일: {pd.Timestamp.today().date()} | 규칙: 월말 {lookback}일 모멘텀 상위
+{top_k}종(절대 모멘텀>0) 익일 시가 동일비중 리밸런스 | 비용 왕복 0.1%
 
 ## 판정 (Stage 1 기준: N>=30, 전/후반 양수, t>=2)
 
@@ -192,4 +227,5 @@ def _write_report(ep: pd.DataFrame, open_pos: list, verdict: dict, stats: dict,
                     if open_pos else "없음"))
     now = ", ".join(now_target) or "전원 자격 미달(현금)"
     lines.append(f"현재 시그널(참고 — 다음 월말에 확정): {now}")
-    (RESULTS_DIR / "rotation.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (RESULTS_DIR / f"{out_prefix}.md").write_text("\n".join(lines) + "\n",
+                                                 encoding="utf-8")
