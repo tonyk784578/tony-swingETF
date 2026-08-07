@@ -1,0 +1,219 @@
+# TonySwingETF
+
+**메인 목적: 유망 ETF를 스윙매매 기법으로 수익 창출** (2026-08-06 방향 확정).
+리서치/백테스트 우선, 자동매매 아님.
+
+두 개의 트랙:
+
+1. **ETF 스윙 (메인)** — 유망 ETF 대상 수일+ 보유 스윙 전략 개발·검증 (구축 예정)
+2. **개별주 갭 패턴 (서브 모듈)** — 대형주(삼성전자·SK하이닉스·삼성전기)의
+   "당일 시가 매수 → 종가 매도" 가능성 타진. 아래 파이프라인 전체가 이 트랙이며,
+   섀도 장부·사이징/손절 실험이 자동 가동 중. 결과는 메인 트랙 판단의 참고 자료.
+
+참고: `/home/user/Project/SwingETF`는 기존 ETF 스윙 시스템(자동매매 종료 상태) —
+유니버스·리서치 관례를 참고하되 계좌·크론·데이터는 완전 분리 유지.
+
+## 구조
+
+```text
+config.yaml          # 모든 파라미터. 최상위 라이브 키(main_stock 등)와
+                     # 동결 실험 섹션(ml/refine/sizing/stoploss)을 구분
+src/config.py        # 설정 로더 + 경로
+src/data_loader.py   # FDR+yfinance 다운로드, parquet 캐시, 정정 감시, confirmed_cutoff
+src/align.py         # KR-US 날짜 정렬 (룩어헤드 방지 핵심) + 검증
+src/signals.py       # [개별주] 조건(불리언 시그널) 정의
+src/backtest.py      # [개별주] 조합 열거 + open→close 통계 (combo_stats는 공용)
+src/robustness.py    # [개별주] 생존 조건 비용 민감도 + 연도별 분해
+src/report.py        # [개별주] CSV/차트/split 검증/report.md
+src/paper.py         # [개별주] 포워드 섀도 장부
+src/analysis.py      # [개별주] 신호 세기·손실연도·전이 검증
+src/sizing.py        # [개별주] 2단 사이징 실험 (동결)
+src/minute_data.py   # [개별주] 분봉 수집 (손절 검증용)
+src/stoploss.py      # [개별주] 손절 룰 검증 (동결, 표본 대기)
+src/ml_experiment.py # [개별주] ML 실험 (동결·기각)
+src/etf_swing.py     # [ETF] 전략 신호·스윙 엔진·스크리닝·후보 공용 반복자
+src/etf_paper.py     # [ETF] Stage 2 섀도 장부 (리플레이 방식)
+src/portfolio.py     # [ETF] 통합 계좌 시뮬 (승률 비중 + MDD 캘리브레이션)
+src/refinements.py   # [ETF] 레짐필터·청산 실험 (동결·판정 완료)
+src/health.py        # 헬스체크 + 판정 준비 상태
+src/main.py          # CLI (디스패치 테이블)
+paper/ledger.csv     # 섀도 장부 — 삭제/재생성 금지 (etf_ledger.csv 동일)
+data/                # parquet 캐시 + revisions.log (커밋 금지)
+results/             # 리포트·CSV·차트 산출물
+```
+
+## 실행
+
+```bash
+source .venv/bin/activate          # 또는 .venv/bin/python 직접 사용
+python -m src.main download        # 데이터 다운로드/캐시 (--force로 강제 갱신)
+python -m src.main verify          # 날짜 정렬 검증 (샘플 출력 + 전수 assert)
+python -m src.main backtest        # 조건별 통계표 출력 + stats_all.csv
+python -m src.main robustness      # 생존 조건 비용 민감도 + 연도별 분해
+python -m src.main report          # 차트 + split 검증 + 로버스트니스 + report.md
+python -m src.main paper           # 포워드 장부 갱신 + 인샘플 대비 성과 (장 마감 후 실행)
+python -m src.main paper --preview # 아침(개장 전) 조건 발동 미리보기 (--force 권장)
+python -m src.main ml              # 사전 등록 ML 실험 재현 (기각 확정 — 설정 변경 금지)
+python -m src.main analysis        # 신호 세기 + 손실연도 진단 + 전이 검증
+python -m src.main sizing          # 2단 사이징 실험 (사전 등록 — 재현용)
+python -m src.main minute          # 분봉 수집/append (evening cron에 포함)
+python -m src.main stoploss        # 손절 룰 검증 (발동일 30건부터 판정)
+python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 4전략)
+python -m src.main portfolio       # [메인] 후보 4개 통합 계좌 시뮬 (MDD -8% 캘리브레이션)
+python -m src.main refine          # 개선 실험 재현 (레짐필터·청산 — 판정 완료, 재실행 금지)
+.venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
+python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
+python -m src.main all             # download → verify → report 일괄
+.venv/bin/pytest                   # 핵심 로직(정렬·시그널·통계) 테스트 — 수정 후 필수
+```
+
+- 데이터 오염 감시: 재다운로드 때 과거 종가가 0.1% 넘게 바뀌면 stderr 경고 +
+  `data/revisions.log` 기록 (액면분할·데이터 정정 감지). 경고 발생 시 백테스트/장부 재검토.
+
+## 룩어헤드 방지 3원칙 (절대 규칙)
+
+한국 거래일 D의 매매 판단에 사용 가능한 정보:
+
+1. **미국 현지 날짜 < D** 인 마지막 미국 일봉 (미국 D-1 봉은 한국시간 D 새벽 마감)
+2. 한국 거래일 **D-1까지**의 국내 데이터 (KOSPI 수익률, 이평선 등 — 반드시 shift)
+3. 당일 **시가** (갭 계산 전용 — 진입 판단에만 사용, day_ret 계산 외 사용 금지)
+
+미국 수익률은 심볼 자체 캘린더에서 `pct_change` 후 `merge_asof`로 매핑한다.
+union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 금지.
+`verify` 단계가 실패하면 백테스트를 진행하지 않는다.
+
+## 규칙
+
+- 종목코드는 항상 문자열 (`005930` — leading zero 보존)
+- 파라미터 변경은 config.yaml에서만 (코드에 임계값 하드코딩 금지)
+- 다운로드 실패 시 기존 캐시로 degrade — 오프라인에서도 재실행 가능해야 함
+- 새 조건 추가 시: config.yaml `signals`에 구간 정의 → `signals.py`가 자동 반영
+- 다중검정 주의: 조합을 늘릴수록 우연히 좋아 보이는 조건이 늘어난다.
+  결론은 반드시 split 검증(전반부 상위 → 후반부 유지)과 t-stat을 함께 볼 것
+
+## 메인 트랙: ETF 스윙 (Stage 1 완료 2026-08-06)
+
+- `python -m src.main etf` — 유니버스 12종 x 4전략(breakout/macross/rsi2/us_dip)
+  스크리닝. 파라미터는 config `etf` (탐색 단계 — 튜닝 반복 금지).
+- **Stage 1 결과** (results/etf_screening.md): 48조합 중 후보 4개 통과
+  (N>=30, 전/후반 양수, t>=2) — KODEX200 breakout(t=2.60), KODEX_Auto
+  macross(t=2.40), KODEX_Lev breakout(t=2.35), TIGER_NASDAQ100 breakout(t=2.19).
+  **추세추종(돌파) 계열이 지배적, ETF에서 평균회귀는 약함.**
+- 엔진 규칙: 신호일 다음날 시가 진입, 청산신호일 종가 청산(동시호가 근사),
+  최소 1일~최대 10일 보유, 왕복 0.1% (ETF 거래세 면제).
+- **Stage 2 가동 (2026-08-06)**: 후보 4개를 config `etf_paper`에 사전 등록·동결.
+  `paper` 단계가 ETF 섀도도 함께 처리 — 저녁: 확정 봉까지 리플레이해 freeze 이후
+  진입한 **완결 트레이드**만 `paper/etf_ledger.csv`에 append(멱등), 미청산 포지션은
+  상태 표시. 아침 preview: 오늘 시가 진입 신호 + 보유 현황. cron 변경 불필요.
+  주의: 2026년 6~7월 폭락 구간 리플레이에서 돌파 전략이 큰 손실(레버리지 -23.7%)
+  — 최근 레짐이 돌파에 불리했음. 포워드 판정 전까지 실거래 금지.
+
+## 코드·보안·구조 검토 (2026-08-06 완료)
+
+- 3방향 리뷰(정확성·보안·구조) 결과 치명적 룩어헤드 결함 없음. 반영된 수정:
+  - ETF 후보 캐시가 `download` 단계에 포함 안 되어 저녁 장부가 하루 늦던 문제
+  - freeze 당일이 아웃오브샘플에 포함되던 문제 (`>` 로 제외)
+  - 포트폴리오 Sharpe가 거래 구간만으로 계산되던 문제 → 전체 거래일 기준
+    (1.66 → **1.39**가 정직한 수치, CAGR/MDD는 불변)
+  - 리서치 명령(etf/portfolio/refine)도 장중 실행 시 당일 미완성 봉 제외
+  - 정정 감시가 Close만 보던 것 → Open 포함, `.env` 600, 로그 180일 보존
+- 구조: 진입 신호 정의는 `raw_entry_signal()` 하나(백테스트·프리뷰 공용),
+  후보 로딩은 `iter_candidates()` 하나, 16시 컷오프는 `confirmed_cutoff()` 하나.
+  이 세 함수를 우회한 별도 구현 금지.
+
+## 개선 실험 결과 (2026-08-06, `refine` 단계 — 재실행 금지)
+
+- **레짐 필터 (변동성비 20/60 > 1.5 진입금지): 전부 기각** — 필터가 막는 진입이
+  거의 없고 개선 없음. 7월 폭락 대비책으로는 무효, 레짐 필터 미도입 유지.
+- **청산 규칙 (트레일링 -5%): 2건 채택** (전/후반 각각 t-stat 엄격 개선 기준)
+  - KODEX_Auto macross → **ma_plus_trail** (평균 +1.75→+1.92%, MDD -17.3→-15.4%, t 2.40→2.65)
+  - TIGER_NASDAQ100 breakout → **trail_only** (평균 +0.51→+1.01%, t 2.19→3.64)
+  - 채택분은 config `etf_paper.candidates`의 `exit` 필드에 반영 완료 (장부 0행 시점).
+- 코드: `candidate_flags()`가 exit 모드(ma/trail_only/ma_plus_trail)를 일괄 적용 —
+  섀도·포트폴리오·프리뷰 모두 동일 규칙 사용.
+
+## 포트폴리오 규칙 (2026-08-06 등록 — config `portfolio`)
+
+- `python -m src.main portfolio` — Stage 2 후보 4개를 한 계좌로 운용하는 시뮬레이션.
+- 규칙: 같은 지수 그룹(KODEX200/레버리지) 동시 보유 금지 — 겹치면 **그 시점 승률
+  점수 높은 쪽 선택**. 진입 비중 = 슬롯(총노출/3) x (승률/0.5), 레버리지 2배 계상.
+- **MDD -8% 목표**: 역사적 MDD로 총노출을 반복 캘리브레이션 → 청산 규칙 채택 반영 후
+  **총노출 0.53에서 MDD -8.0%, CAGR +6.7%, Sharpe 1.66** (full 1.0이면 CAGR +12.8%, MDD -14.5%).
+  주의: 과거 최악 기준 조정이며 미래 보장은 아님 — 실전은 여유를 둘 것.
+- 그룹 중복 스킵이 470건 중 114건 — 200/레버리지 중복 통제가 실제로 작동.
+
+## 운영: 헬스체크 (`health` — evening cron 마지막에 자동 실행)
+
+- 가격 데이터 신선도(3영업일), evening 로그 최근성, 데이터 정정 발생 감시.
+- **판정 준비 상태**: 사전 등록된 기준 대비 표본 도달률이 매일 찍힘.
+  확인: `grep -A8 "판정 준비" paper/logs/*.log`
+
+## 판정 기준 (2026-08-07 확정 — 장부 0행 시점에 등록, 변경 금지)
+
+데이터를 본 뒤 기준을 바꾸면 사후 기준 변경이 되어 사전 등록 자체가 무효가 된다.
+기준은 config `etf_paper.judgment` 한 곳에만 있고 `health`가 이를 읽어 표시한다.
+
+| 대상 | 기준 | 과거 빈도 기준 소요 | 용도 |
+| --- | --- | --- | --- |
+| ETF **합산** | 30건 | 38.9건/년 → 약 9개월 | 돌파 계열 생존 **중간점검 전용** |
+| ETF **후보별** | 20건 | 7.2~11.5건/년 → 약 1.7~2.8년 | **실거래 채택 판정은 이것만** |
+| 개별주 주력조건 | 30건 | 23.0건/년 → 약 16개월 | 서브 트랙 판정 |
+| 손절용 분봉 발동일 | 30건 (현재 7) | 23.0건/년 → 약 12개월 | 손절 룰 판정 |
+
+- **합산 30건으로 실거래를 결정하지 않는다.** 합산은 4후보를 섞은 수치라
+  "어느 후보가 유효한가"를 가릴 힘이 없다. 합산이 좋아도 후보별 20건 미달이면 대기.
+- 판정까지 1~3년이 걸린다는 것이 이 기준의 정직한 귀결이다. 기다리는 동안
+  파라미터를 만지면 다중검정으로 지금까지의 검증이 전부 무효가 된다.
+
+## 진행 중 실험 (사전 등록 — 판정 대기)
+
+- **2단 사이징** (config `sizing`, `python -m src.main sizing`): NVDA ≤ -3%면 비중 1.0,
+  아니면 0.5. 역사적 반쪽 검증은 **지지**(전/후반 모두 tiered Sharpe > flat,
+  MDD -18.8%→-14.2%). 임계값이 인샘플 유래이므로 **최종 판정은 섀도 장부의
+  weight 컬럼(fwd_sized_mean vs fwd_mean)**으로. flat 대비 우위가 재현되면 채택.
+- **손절 룰** (config `stoploss`, `python -m src.main stoploss`): 레벨 -2%/-3% 동결.
+  분봉 확보 발동일 30건 이상부터 판정 (예비 7건에서는 손절이 되돌림 수익을
+  잘라먹어 크게 불리 — 표본 부족, 판정 보류). 분봉은 evening cron이 매일 수집
+  (`minute` 단계, data/minute_SKHynix_5m.parquet, yfinance 5분봉 60일 한도 대비 자체 축적).
+
+## 리서치 분석 결과 (2026-08-06, `analysis` 단계 — 상세 results/analysis.md)
+
+- **신호 세기**: NVDA -3% 이하 구간(+0.40~0.52%)이 -2~-3% 구간(+0.23%)보다 우수하나
+  완전 단조는 아님. "NVDA ≤ -3%면 베팅 2배" 같은 2단 사이징은 **새 가설로 사전 등록
+  후 검증할 것** — 현재는 미채택.
+- **2024 손실 연도**: 발동일 특성(갭·NVDA 낙폭·변동성)이 다른 해와 구분 안 됨.
+  식별 가능한 레짐 원인 없음 → 정상 분산으로 판정, 레짐 필터 도입 안 함.
+- **전이 검증**: 확정 조건을 한미반도체/DB하이텍/리노공업에 그대로 적용 시 전 기간
+  평균 모두 양수(+0.12~+0.31%)이나 SKHynix(+0.43%, t=3.2)보다 약함. 패턴이 반도체
+  섹터 공통임을 지지하는 참고치 — 거래 대상 확장은 안 함.
+
+## ML 실험 결과 (2026-08-06 — 기각, 재실행 금지)
+
+- 사전 등록 실험(config.yaml `ml`, `python -m src.main ml`): 워크포워드 LightGBM
+  (2015~2019 학습 → 2020~ 연 단위 확장)이 룰 `nvda_down2 & kospi_down`을 이기는지 검증.
+- **판정: 기각.** OOS에서 ML 평균 +0.098%(t=0.80, MDD -58.5%) vs 룰 +0.382%(t=2.23,
+  MDD -18.8%). 수동 룰이 신호를 충분히 포착함. 상세: `results/ml_report.md`.
+- 설정을 바꿔 재실행하면 다중검정으로 실험이 무효가 됨 — 새 가설이 있을 때만
+  새 실험으로 사전 등록할 것.
+
+## 운영 체제: 백테스트 + 섀도 (2026-08-06 확정)
+
+- KIS 브로커 연동은 **보류** — 주식(-01) 모의계좌는 1인 1개 한도인데 SwingETF가
+  사용 중. 발급받은 선물옵션(-03) 모의계좌(60047447)는 주식/ETF 현물 주문 불가.
+  `.env`의 키는 유효 확인됨(토큰 발급 성공) — 향후 연동 시 재사용.
+- 섀도 트래킹 자동화: crontab 등록됨 (평일 08:30 morning / 16:20 evening,
+  `scripts/daily_paper.sh`, 로그는 `paper/logs/`). crontab 스냅샷 관례에 따라
+  `/home/user/Project/SwingETF/scripts/crontab.snapshot`에도 동일 라인 반영됨.
+  WSL이 꺼져 있으면 cron이 안 돌므로, 놓친 날은 다음 evening 실행이 자동 소급 기록.
+
+## 포워드 페이퍼 테스트 (paper)
+
+- 추적 조건은 config.yaml `paper.conditions`에 **사전 등록·동결**한다.
+  freeze_date 이후 발생분만 아웃오브샘플 성과다. 조건을 바꾸면 freeze_date를
+  갱신하되 기존 ledger 행은 절대 삭제하지 않는다 (사전 등록 기록).
+- 일일 루틴: 아침 `paper --preview --force`로 발동 여부 확인 →
+  장 마감 후(16시 이후) `paper`로 장부 갱신. 16시 이전 실행 시 당일 봉이
+  미완성이므로 당일은 자동 제외된다(다음 실행 때 기록됨).
+- KIS 모의계좌 연동은 미구현 — 자격증명은 프로젝트 루트 `.env`에 입력
+  (KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_IS_PAPER=true 고정).
+  SwingETF 계좌 공유 금지: 두 시스템이 서로 보유를 오인함. `.env`는 커밋 금지.

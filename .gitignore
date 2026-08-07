@@ -1,0 +1,14 @@
+# 자격증명 — 절대 커밋 금지
+.env
+
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+data/
+paper/logs/
+
+# 산출물 중 재생성 가능한 대용량만 제외 — results/*.md 는 사전 등록 실험의
+# 판정 기록이므로 추적한다 (섀도 장부 paper/*.csv 도 추적: 삭제·재생성 금지 자산)
+results/*.csv
+results/*.png

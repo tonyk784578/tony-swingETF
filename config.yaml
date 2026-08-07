@@ -1,0 +1,224 @@
+# TonySwingETF 백테스트 파라미터
+# 임계값은 소수(0.01 = 1%)
+
+# 라이브 파이프라인이 참조하는 최상위 키 — 동결된 실험 섹션(ml/refine 등)은
+# 재현용 사본만 갖고, 살아있는 코드는 여기만 본다.
+main_stock: SKHynix        # 서브 트랙 주력 종목 (분석·사이징·손절·헬스체크 공용)
+
+data:
+  start: "2015-01-01"
+  kr_stocks:
+    "005930": "SamsungElec"
+    "000660": "SKHynix"
+    "009150": "SamsungElecMech"
+  kr_index:
+    KS11: "KOSPI"
+  us_symbols:
+    "^IXIC": "NASDAQ"
+    "^SOX": "SOX"
+    NVDA: "NVDA"
+  # 캐시 마지막 날짜가 오늘 기준 이 일수 이내면 재다운로드 생략
+  cache_max_age_days: 3
+
+cost:
+  round_trip: 0.002   # 왕복 거래비용 0.2%
+
+signals:
+  sox:                # 전일(미국 D-1) SOX 수익률 구간
+    up1: [0.01, null]       # > +1%
+    up2: [0.02, null]       # > +2%
+    down1: [null, -0.01]    # < -1%
+    flat: [-0.01, 0.01]     # -1% ~ +1%
+  nvda:               # 전일 NVDA 수익률 구간
+    up2: [0.02, null]
+    up3: [0.03, null]
+    down2: [null, -0.02]
+    flat: [-0.02, 0.02]
+  kospi:              # 전날 KOSPI 종가 수익률
+    up: [0.0, null]
+    down: [null, 0.0]
+  ma20:               # 전일 종가가 20일 이평선 위/아래
+    above: true
+    below: false
+  gap:                # 당일 시가 갭 (시가/전일종가 - 1)
+    up_big: [0.01, null]     # 갭업 +1% 이상
+    up_small: [0.0, 0.01]    # 갭업 0~1%
+    down: [null, 0.0]        # 갭다운
+    down_big: [null, -0.01]  # 갭다운 -1% 이하 (역방향/되돌림 테스트)
+
+backtest:
+  min_samples: 30          # 이보다 표본이 적으면 순위 평가 제외
+  max_combo: 2             # 단독 + 2개 조합 전부
+  extra_combos:            # 사전 지정 3개짜리 조합 목록 (현재 4건)
+    - [sox_up1, gap_up_small, ma20_above]
+    - [sox_up2, gap_up_big, ma20_above]
+    - [sox_down1, gap_down, kospi_down]
+    - [nvda_up2, gap_up_small, ma20_above]
+
+split:
+  boundary: "2021-01-01"   # 전반부(~2020) / 후반부(2021~) 경계
+
+robustness:
+  costs: [0.002, 0.003, 0.005]   # 생존 조건 비용 민감도 테스트용 왕복 비용
+
+report:
+  top_n_chart: 5           # 누적수익 곡선에 그릴 상위 조건 수
+  top_n_split: 10          # split 검증에 쓸 전반부 상위 조건 수
+
+etf:
+  # 메인 트랙: ETF 스윙 스크리닝 (Stage 1 — 탐색 단계임을 명시. 상위 후보는
+  # Stage 2에서 사전 등록 후 섀도로 검증한다. 다중검정: 12종 x 4전략 = 48테스트)
+  cost_round_trip: 0.001    # ETF는 거래세 면제 — 수수료+스프레드 왕복 0.1% 가정
+  min_trades: 30
+  max_hold: 10              # 기본 최대 보유일 (us_dip은 자체 hold_days 사용)
+  universe:
+    "069500": KODEX200
+    "122630": KODEX_Lev
+    "114800": KODEX_Inverse
+    "229200": KODEX_KOSDAQ150
+    "233740": KODEX_KOSDAQ150Lev
+    "091160": KODEX_Semicon
+    "305720": KODEX_Battery
+    "133690": TIGER_NASDAQ100
+    "132030": KODEX_Gold
+    "091170": KODEX_Bank
+    "102970": KODEX_Securities
+    "091180": KODEX_Auto
+  strategies:
+    breakout:               # 추세추종: 20일 신고가 돌파 매수, MA10 이탈 청산
+      lookback: 20
+      exit_ma: 10
+    macross:                # 추세추종: MA5/20 골든크로스 매수, 데드크로스 청산
+      fast: 5
+      slow: 20
+    rsi2:                   # 평균회귀: RSI(2) 과매도 매수, MA5 회복 청산
+      period: 2
+      entry_below: 10
+      exit_ma: 5
+    us_dip:                 # 미국장 연계: 나스닥 전일 -1.5% 이하 → 시가 매수, 3일 보유
+      threshold: -0.015
+      hold_days: 3
+
+etf_paper:
+  # Stage 2 사전 등록 (2026-08-06 동결) — Stage 1 스크리닝 통과 후보 4개.
+  # freeze_date 이후 진입분만 아웃오브샘플. 후보 변경 시 freeze 갱신, ledger 보존.
+  freeze_date: "2026-08-06"
+  ledger: paper/etf_ledger.csv
+  trailing_stop: 0.05   # 채택된 exit 변형의 라이브 파라미터 (refine 섹션은 재현용 사본)
+  judgment:
+    # 판정 기준 사전 등록 (2026-08-07 확정 — 장부 0행 시점에 결정, 이후 변경 금지).
+    # 데이터를 본 뒤 기준을 바꾸면 사후 기준 변경이 되어 사전 등록이 무효가 된다.
+    # 과거 발동 빈도(2015-01~2026-08, 11.6년): 4후보 합산 38.9건/년,
+    # 후보별 7.2(KODEX_Auto)~11.5(TIGER)건/년.
+    pooled_checkpoint: 30    # 합산 완결 트레이드 (약 9개월). '돌파 계열이 여전히
+                             # 살아있는가'의 중간점검 전용 — 어느 후보로 실거래할지의
+                             # 근거로 쓰지 않는다. 미달이면 계열 재검토.
+    per_candidate_min: 20    # 후보별 완결 트레이드 (약 1.7~2.8년). 실거래 채택 판정은
+                             # 오직 이 기준으로만. 합산이 좋아도 후보별 미달이면 대기.
+  candidates:
+    # exit: ma(기본) | trail_only | ma_plus_trail — refine 실험(2026-08-06) 채택분 반영
+    - {code: "069500", name: KODEX200, strategy: breakout}
+    - {code: "091180", name: KODEX_Auto, strategy: macross, exit: ma_plus_trail}
+    - {code: "122630", name: KODEX_Lev, strategy: breakout}
+    - {code: "133690", name: TIGER_NASDAQ100, strategy: breakout, exit: trail_only}
+
+portfolio:
+  # 포트폴리오 시뮬레이션 규칙 (2026-08-06 등록)
+  # - 동일 지수 그룹은 동시 보유 금지: 신호 겹치면 그 시점 승률 점수 높은 쪽 선택
+  # - 진입 비중 = (max_gross/3슬롯) x (점수/0.5), 남은 노출 예산 내로 클립
+  #   (점수 = 해당 후보의 직전 완결 트레이드 승률, 표본 부족 시 0.5)
+  # - 레버리지 ETF는 노출 2배로 계상
+  # - 총노출 상한은 '역사적 MDD -8%'에 맞춰 2-pass 캘리브레이션 (리스크 캘리브레이션
+  #   목적의 조정이며 신호 튜닝이 아님)
+  target_mdd: -0.08
+  max_gross_exposure: 1.0
+  score_window: 100          # 승률 계산에 쓰는 최근 완결 트레이드 수
+  score_min_trades: 10       # 이보다 적으면 점수 0.5 (중립)
+  exposure_groups:
+    kospi200: ["069500", "122630"]
+  leverage:
+    "122630": 2
+
+refine:
+  # 사전 등록 (2026-08-06 동결) — 두 실험 모두 그리드서치 금지, 1회 실행 판정.
+  regime_filter:
+    # 가설: 변동성 급등 레짐에서 신규 진입을 쉬면 돌파의 꼬리 손실이 줄어든다
+    # 채택 기준: 전/후반 각각에서 (t-stat 유지·개선) AND (MDD 개선)
+    vol_fast: 20            # ETF 자체 20일 변동성
+    vol_slow: 60            # / 60일 변동성
+    block_above: 1.5        # 비율 > 1.5 면 신규 진입 금지 (보유분은 유지)
+  exit_rules:
+    # 가설: 트레일링 스탑이 고정 MA 이탈보다 추세 이익을 길게 지킨다
+    # 변형 2개만: trailing 단독 / MA+trailing 결합. 채택 기준: 전/후반 각각 t-stat 개선
+    trailing_stop: 0.05     # 보유 중 최고 종가 대비 -5%
+
+analysis:
+  # 신호 세기 분석: 주력 조건 발동일을 NVDA 하락폭 구간으로 쪼개 단조성 확인
+  strength_condition: "kospi_down"        # 고정 조건 (nvda 구간과 AND)
+  strength_bins: [-0.10, -0.05, -0.04, -0.03, -0.02]   # nvda_ret 구간 경계
+  diagnose_year: 2024                     # 유일한 손실 연도 진단
+  # 전이 검증: 확정 조건을 그대로 새 종목에 적용 (새 조건 탐색 금지 — 다중검정)
+  transfer_condition: "nvda_down2 & kospi_down"
+  transfer_stocks:
+    "042700": HanmiSemicon
+    "000990": DBHiTek
+    "058470": LeenoIndustrial
+
+sizing:
+  # 사전 등록 실험 (2026-08-06 동결) — 2단 사이징.
+  # 가설: 주력 조건 발동일 중 NVDA <= -3% 인 날에 더 크게 베팅하면
+  #       리스크 조정 성과(Sharpe)가 균일 베팅보다 좋다.
+  # 주의: -3% 임계값은 인샘플 분석(analysis)에서 나온 것 → 역사적 검증은
+  #       전/후반 반쪽 일관성까지만 참고하고, 최종 판정은 섀도 포워드 성과로 한다.
+  # 역사적 지지 기준: 전반부와 후반부 각각에서 tiered Sharpe > flat Sharpe
+  condition: "nvda_down2 & kospi_down"
+  strong_threshold: -0.03     # nvda_ret <= -3% 이면 강신호
+  weak_weight: 0.5            # 약신호 베팅 비중 (자본 대비)
+  strong_weight: 1.0          # 강신호 베팅 비중
+
+minute:
+  # 분봉 수집 (손절 룰 검증용) — yfinance 5분봉, 최대 60일 백필 + 매일 append
+  symbol: "000660.KS"
+  interval: "5m"
+  cache: minute_SKHynix_5m.parquet   # data/ 아래
+
+stoploss:
+  # 사전 등록 (2026-08-06 동결): 주력 조건 발동일에 장중 손절이 성과를 개선하는가.
+  # 손절 레벨은 아래 2개만 테스트 (그리드서치 금지). 판정은 분봉 확보된
+  # 발동일 min_days 이상일 때만 유효 — 그 전에는 '표본 부족' 참고치.
+  levels: [-0.02, -0.03]
+  min_days: 30
+
+ml:
+  # 사전 등록 실험 (2026-08-06 동결) — 그리드서치·설정 변경 후 재실행 금지.
+  # 가설: 연속값 피처를 쓰는 소형 GBM이 수동 룰보다 아웃오브샘플에서 낫다.
+  # 채택 기준(셋 다 충족): OOS 거래수 >= min_trades,
+  #   ML 누적 순수익 > 벤치마크 룰 누적 순수익, ML 평균 순수익 t-stat >= 2
+  target_stock: SKHynix
+  benchmark_condition: "nvda_down2 & kospi_down"
+  oos_start: 2020            # 워크포워드 시작 연도 (2015~2019 최초 학습)
+  features: [sox_ret, ixic_ret, nvda_ret, kospi_prev_ret, gap, ma20_dist]
+  min_trades: 30
+  model:                     # LGBMRegressor, 목표변수 = day_ret - cost
+    n_estimators: 200
+    learning_rate: 0.05
+    max_depth: 3
+    num_leaves: 7
+    min_child_samples: 50
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 42
+
+paper:
+  # 포워드 페이퍼 테스트 — 사전 등록된 조건만 추적. freeze_date 이후가 아웃오브샘플.
+  # 조건 변경/추가 시 freeze_date를 갱신하고 기존 ledger는 보존할 것.
+  freeze_date: "2026-08-06"
+  ledger: paper/ledger.csv
+  conditions:
+    - stock: SKHynix
+      condition: "nvda_down2 & kospi_down"   # 주력 후보 (0.3% 비용에서도 t>=2)
+    - stock: SKHynix
+      condition: "sox_down1 & nvda_down2"
+    - stock: SKHynix
+      condition: "nvda_down2 & gap_down"
