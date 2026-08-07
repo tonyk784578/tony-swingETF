@@ -26,6 +26,11 @@ case "${1:-evening}" in
       "$PY" -m src.main minute
       "$PY" -m src.main paper
       "$PY" -m src.main health
+      # 장부 스냅샷 자동 커밋 (포워드 기록 보호 — paper/ 경로만, 로컬 커밋.
+      # 변경 없으면 조용히 넘어간다. 푸시는 수동)
+      git -C "$ROOT" add paper/ >/dev/null 2>&1 || true
+      git -C "$ROOT" commit -q -m "장부 스냅샷 $(date +%F) (자동)" -- paper/ \
+        >/dev/null 2>&1 || true
     } >>"$LOG" 2>&1
     ;;
   *)

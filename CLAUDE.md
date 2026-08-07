@@ -37,7 +37,8 @@ src/portfolio.py     # [ETF] 통합 계좌 시뮬 (승률 비중 + MDD 캘리브
 src/refinements.py   # [ETF] 레짐필터·청산 실험 (동결·판정 완료)
 src/crash_study.py   # [ETF] 폭락 사례 연구 + MA200 게이트 (판정 완료·기각)
 src/rotation.py      # [ETF] 듀얼 모멘텀 로테이션 (실험1 기각 / 실험2 확장판 통과·섀도)
-src/health.py        # 헬스체크 + 판정 준비 상태
+src/health.py        # 헬스체크 + 판정 준비 상태 (+판정 도달 알림)
+src/brief.py         # 일일 브리핑 STATUS.md + 주문 계획 환산 (운영 편의 계층)
 src/main.py          # CLI (디스패치 테이블)
 paper/ledger.csv     # 섀도 장부 — 삭제/재생성 금지 (etf_ledger.csv 동일)
 data/                # parquet 캐시 + revisions.log (커밋 금지)
@@ -67,6 +68,7 @@ python -m src.main crash           # 폭락 사례 분해 + MA200 게이트 재�
 python -m src.main rotation        # 로테이션 실험1(기각) 재현 + 실험2(확장, 통과) 재현
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
+python -m src.main brief           # STATUS.md 수동 갱신 (paper/preview 가 자동 갱신)
 python -m src.main all             # download → verify → report 일괄
 .venv/bin/pytest                   # 핵심 로직(정렬·시그널·통계) 테스트 — 수정 후 필수
 ```
@@ -240,6 +242,25 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 - **2026-08-07 채권 후보 편입 후 (7후보)**: full MDD -14.5%→-13.4%로 개선,
   같은 -8% 목표에서 **총노출 0.58, CAGR +6.69%, Sharpe 1.40** — 채권축 분산이
   노출 여력을 늘림. rotation2는 별도 계좌 전략이라 이 시뮬에 편입하지 않는다.
+
+## 활용성 로드맵 (2026-08-07 수립) + 일일 브리핑
+
+전략: "연구 파이프라인"을 "매일 쓰는 프로그램"으로. 통계 규율(사전 등록·판정 전
+실거래 금지)은 불변 전제.
+
+- **Phase A 보이게 만들기 (완료)**: 루트 `STATUS.md` — 오늘 신호·주문 계획·포지션·
+  판정 진행·레짐·최근 트레이드를 한 페이지로. 아침 프리뷰/저녁 장부가 자동 갱신,
+  `brief`로 수동 갱신. 상태 파일(gitignore — ALERT.md와 같은 취급).
+  아침 신호 발동·판정 표본 도달 시 Windows 알림 (best-effort).
+- **Phase B 실행 형태로 번역 (완료)**: 발동 신호를 주문 계획(비중=노출x슬롯1/3,
+  레버리지 현금 절반, config `ops`의 가상 자본·노출 기준)으로 환산해 STATUS.md에
+  표시. 판정 통과 시 실행기가 이 형식을 소비. ops 값은 운영 편의 — 조정 자유.
+- **Phase C 기록 보호 (완료)**: evening cron 이 `paper/` 변경분을 로컬 자동 커밋
+  ("장부 스냅샷 YYYY-MM-DD (자동)"). 푸시는 수동 — 오프사이트 백업 원하면 push.
+- **Phase D 실행기 (대기 — 외부 차단)**: KIS 계좌 확보(주식 모의계좌 1인 1개 한도,
+  SwingETF 사용 중) 후 주문 실행기. dry-run → 소액 → 캘리브레이션 노출 순.
+- **Phase E 판정·편입 (1.7~3년 지평)**: 후보별 20건 도달(알림 옴) → 통과분만
+  실거래 편입, 미달·실패분 제거. 새 실험은 새 가설 사전 등록으로만.
 
 ## 운영: 헬스체크 (`health` — evening cron 마지막에 자동 실행)
 

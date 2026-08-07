@@ -15,3 +15,6 @@ results/*.png
 
 # 헬스체크가 경고 동안에만 만드는 상태 파일 (health 가 자동 생성·삭제)
 ALERT.md
+
+# 일일 브리핑 상태 파일 (paper/brief 가 매일 재생성 — 기록이 아니라 현재 상태)
+STATUS.md

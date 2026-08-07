@@ -93,8 +93,11 @@ def check_revisions() -> bool:
     return _ok("최근 데이터 정정 없음")
 
 
-def verdict_readiness() -> None:
-    """진행 중 실험들의 판정 표본 도달률. 도달 시 실행할 명령 안내."""
+def readiness_rows() -> list[dict]:
+    """판정 표본 도달률 rows (health 출력·브리핑 공용).
+
+    row: {label, n, need, ready, indent, ready_msg}
+    """
     from .etf_paper import load_etf_ledger
     from .paper import load_ledger
 
@@ -103,14 +106,14 @@ def verdict_readiness() -> None:
     jcfg = cfg["etf_paper"].get("judgment", {})
     pooled_need = jcfg.get("pooled_checkpoint", need)
     cand_need = jcfg.get("per_candidate_min", need)
-    print("\n=== 판정 준비 상태 (기준은 config etf_paper.judgment — 변경 금지) ===")
+    rows = []
 
     led = load_ledger()
     n_stock = 0 if led.empty else int(
         led[led["condition"] == cfg["paper"]["conditions"][0]["condition"]]
         ["triggered"].sum())
-    print(f"  개별주 주력조건 포워드: {n_stock}/{need}"
-          + ("  ← 판정 가능! `paper` 요약으로 판정" if n_stock >= need else ""))
+    rows.append({"label": "개별주 주력조건 포워드", "n": n_stock, "need": need,
+                 "indent": 1, "ready_msg": "판정 가능! `paper` 요약으로 판정"})
 
     etf_led = load_etf_ledger()
     # 합산 30건 기준은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
@@ -119,20 +122,21 @@ def verdict_readiness() -> None:
             for c in cfg["etf_paper"]["candidates"] if "freeze" not in c}
     n_etf = 0 if etf_led.empty else int(
         pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(base).sum())
-    print(f"  ETF 합산(08-06 계열 중간점검): {n_etf}/{pooled_need}"
-          + ("  ← 중간점검 가능 (계열 생존 확인용 — 실거래 채택 근거 아님)"
-             if n_etf >= pooled_need else ""))
+    rows.append({"label": "ETF 합산(08-06 계열 중간점검)", "n": n_etf, "need": pooled_need,
+                 "indent": 1,
+                 "ready_msg": "중간점검 가능 (계열 생존 확인용 — 실거래 채택 근거 아님)"})
     for cand in cfg["etf_paper"]["candidates"]:
         n = 0 if etf_led.empty else int(((etf_led["name"] == cand["name"])
                                          & (etf_led["strategy"] == cand["strategy"])).sum())
-        print(f"    후보별(실거래 판정) {cand['name']} {cand['strategy']}: {n}/{cand_need}"
-              + ("  ← 실거래 채택 판정 가능" if n >= cand_need else ""))
+        rows.append({"label": f"후보별(실거래 판정) {cand['name']} {cand['strategy']}",
+                     "n": n, "need": cand_need, "indent": 2,
+                     "ready_msg": "실거래 채택 판정 가능"})
     r2 = cfg.get("etf_rotation2", {})
     if r2.get("freeze"):
         n_rot = 0 if etf_led.empty else int((etf_led["strategy"] == "rotation2").sum())
-        need_rot = r2.get("judgment_min", cand_need)
-        print(f"    확장 로테이션 rotation2 에피소드: {n_rot}/{need_rot}"
-              + ("  ← 판정 가능" if n_rot >= need_rot else ""))
+        rows.append({"label": "확장 로테이션 rotation2 에피소드", "n": n_rot,
+                     "need": r2.get("judgment_min", cand_need), "indent": 2,
+                     "ready_msg": "판정 가능"})
 
     try:
         from .align import build_master
@@ -144,22 +148,36 @@ def verdict_readiness() -> None:
         master = build_master(data, cfg["main_stock"])
         trig = master.index[condition_mask(master, cfg["paper"]["conditions"][0]["condition"])]
         n_min = len(trig.intersection(coverage(load_minute())))
-        print(f"  손절 검증용 분봉 발동일: {n_min}/{cfg['stoploss']['min_days']}"
-              + ("  ← 판정 가능! `stoploss` 실행" if n_min >= cfg["stoploss"]["min_days"]
-                 else ""))
+        rows.append({"label": "손절 검증용 분봉 발동일", "n": n_min,
+                     "need": cfg["stoploss"]["min_days"], "indent": 1,
+                     "ready_msg": "판정 가능! `stoploss` 실행"})
     except Exception as e:
-        print(f"  손절 검증 집계 실패: {e}")
+        rows.append({"label": f"손절 검증 집계 실패: {e}", "n": 0, "need": 0,
+                     "indent": 1, "ready_msg": "", "error": True})
+    for r in rows:
+        r["ready"] = bool(not r.get("error") and r["need"] and r["n"] >= r["need"])
+    return rows
 
 
-def market_regime() -> None:
-    """시장 레짐 정보 라인 — 폭락 구간 무인 관측 보조 (경고 아님, ALERT 미발동).
+def verdict_readiness() -> list[dict]:
+    """진행 중 실험들의 판정 표본 도달률. 도달 시 실행할 명령 안내."""
+    print("\n=== 판정 준비 상태 (기준은 config etf_paper.judgment — 변경 금지) ===")
+    rows = readiness_rows()
+    for r in rows:
+        pad = "  " * r["indent"]
+        if r.get("error"):
+            print(f"{pad}{r['label']}")
+            continue
+        print(f"{pad}{r['label']}: {r['n']}/{r['need']}"
+              + (f"  ← {r['ready_msg']}" if r["ready"] else ""))
+    return rows
 
-    후보 ETF가 crash_study 사례 정의(60일 고점 대비 -10%)에 들어와 있으면 표시만
-    한다. 판단·차단은 하지 않는다 — 섀도 관측은 폭락 구간에서도 계속되어야 한다.
-    """
+
+def regime_rows() -> list[dict]:
+    """후보 ETF의 60일 고점 대비 낙폭 rows (health 출력·브리핑 공용)."""
     cfg = load_config()
     p = cfg["crash_study"]["episode"]
-    print("\n=== 시장 레짐 (60일 고점 대비 — 정보성) ===")
+    rows = []
     seen: set[str] = set()
     for cand in cfg["etf_paper"]["candidates"]:
         code = str(cand["code"])
@@ -171,8 +189,21 @@ def market_regime() -> None:
             continue
         close = pd.read_parquet(path)["Close"]
         dd = close.iloc[-1] / close.rolling(p["lookback"], min_periods=1).max().iloc[-1] - 1
-        mark = "  ← 폭락 구간 (섀도 손익 변동 커짐 — 관측은 계속)" if dd < p["drawdown"] else ""
-        print(f"  {cand['name']}: {dd:+.1%}{mark}")
+        rows.append({"name": cand["name"], "dd": float(dd),
+                     "crash": bool(dd < p["drawdown"])})
+    return rows
+
+
+def market_regime() -> None:
+    """시장 레짐 정보 라인 — 폭락 구간 무인 관측 보조 (경고 아님, ALERT 미발동).
+
+    후보 ETF가 crash_study 사례 정의(60일 고점 대비 -10%)에 들어와 있으면 표시만
+    한다. 판단·차단은 하지 않는다 — 섀도 관측은 폭락 구간에서도 계속되어야 한다.
+    """
+    print("\n=== 시장 레짐 (60일 고점 대비 — 정보성) ===")
+    for r in regime_rows():
+        mark = "  ← 폭락 구간 (섀도 손익 변동 커짐 — 관측은 계속)" if r["crash"] else ""
+        print(f"  {r['name']}: {r['dd']:+.1%}{mark}")
 
 
 def _notify_desktop(title: str, msg: str) -> None:
@@ -217,8 +248,12 @@ def run_health() -> None:
     print("=== health check ===")
     _WARNINGS.clear()
     results = [check_data_freshness(), check_evening_log(), check_revisions()]
-    verdict_readiness()
+    rows = verdict_readiness()
     market_regime()
     n_warn = len(results) - sum(results)
     print(f"\nhealth: {'모두 정상' if n_warn == 0 else f'경고 {n_warn}건 — 위 [WARN] 확인'}")
     _publish_alert(_WARNINGS)
+    # 판정 표본 도달은 몇 년에 한 번 오는 결정 시점 — 알림으로 승격 (처리 전까지 매일)
+    ready = [r["label"] for r in rows if r["ready"]]
+    if ready:
+        _notify_desktop("TonySwingETF 판정 도달", "; ".join(ready))

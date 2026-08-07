@@ -5,6 +5,12 @@
 # 재현용 사본만 갖고, 살아있는 코드는 여기만 본다.
 main_stock: SKHynix        # 서브 트랙 주력 종목 (분석·사이징·손절·헬스체크 공용)
 
+ops:
+  # 운영 편의 계층 (신호·판정과 무관 — 조정해도 통계 오염 없음)
+  virtual_capital: 10000000  # STATUS.md 주문 계획 환산용 가상 자본 (원)
+  exposure: 0.58             # 총노출 — portfolio 캘리브레이션 결과의 수동 반영
+  notify_signals: true       # 아침 신호 발동 시 데스크톱 알림
+
 data:
   start: "2015-01-01"
   kr_stocks:

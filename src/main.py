@@ -97,6 +97,10 @@ def cmd_paper(show_preview: bool, force: bool) -> None:
     if show_preview:
         preview(data)
         preview_etf(force)
+        from .brief import STATUS_PATH, write_status
+
+        write_status("morning", notify=True)
+        print(f"\nbrief: {STATUS_PATH}")
         return
     ledger, added = update_ledger(masters)
     print(f"ledger: {added} new row(s) appended "
@@ -125,6 +129,10 @@ def cmd_paper(show_preview: bool, force: bool) -> None:
           .to_string(index=False, formatters={"fwd_mean": "{:+.3%}".format,
                                               "fwd_cum": "{:+.2%}".format,
                                               "insample_mean": "{:+.3%}".format}))
+    from .brief import STATUS_PATH, write_status
+
+    write_status("evening")
+    print(f"\nbrief: {STATUS_PATH}")
 
 
 def cmd_ml() -> None:
@@ -328,6 +336,13 @@ def cmd_crash(force: bool) -> None:
     print("\nreport:", RESULTS_DIR / "crash_study.md")
 
 
+def cmd_brief() -> None:
+    from .brief import STATUS_PATH, write_status
+
+    write_status("manual")
+    print(f"brief: {STATUS_PATH}")
+
+
 def cmd_health() -> None:
     from .health import run_health
 
@@ -352,7 +367,7 @@ def main() -> None:
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
-                                 "health", "all"])
+                                 "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -375,6 +390,7 @@ def main() -> None:
         "refine": lambda: cmd_refine(args.force),
         "crash": lambda: cmd_crash(args.force),
         "rotation": lambda: cmd_rotation(args.force),
+        "brief": cmd_brief,
         "health": cmd_health,
     }
     if args.step == "all":

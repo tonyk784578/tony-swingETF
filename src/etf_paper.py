@@ -127,13 +127,11 @@ def etf_forward_summary(ledger: pd.DataFrame, status: list[dict]) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def preview_etf(force: bool = False) -> None:
-    """아침용: 오늘 시가 진입 신호 여부 + 보유 포지션 상태.
-
-    진입 판정은 백테스트와 동일한 raw_entry_signal의 마지막 값을 쓴다 —
-    별도 구현을 두면 전략 정의 변경 시 프리뷰가 조용히 어긋난다.
-    """
-    print("\n=== ETF swing preview (Stage 2 candidates) ===")
+def candidate_states(force: bool = False) -> list[dict]:
+    """후보별 아침 상태 (프리뷰·브리핑 공용) — 진입 판정은 백테스트와 동일한
+    raw_entry_signal의 마지막 값. 별도 구현을 두면 전략 변경 시 조용히 어긋난다."""
+    cfg = load_config()
+    out = []
     for cand, df, entry, exit_, max_hold, trailing in _candidate_frames(force):
         if cand["strategy"] == "us_dip":
             # 오늘의 us_dip 플래그 = 가장 최근 확정 미국 봉 (아직 df 인덱스 밖)
@@ -141,7 +139,7 @@ def preview_etf(force: bool = False) -> None:
             from .data_loader import load_symbol
 
             latest_us = us_returns(load_symbol("^IXIC", "us")).iloc[-1]
-            thr = load_config()["etf"]["strategies"]["us_dip"]["threshold"]
+            thr = cfg["etf"]["strategies"]["us_dip"]["threshold"]
             enter_today = bool(latest_us <= thr)
         else:
             # 마지막 확정 봉의 raw 신호 = '다음 개장(오늘) 진입' — 백테스트와 동일 함수
@@ -149,45 +147,58 @@ def preview_etf(force: bool = False) -> None:
             enter_today = bool(raw.iloc[-1])
 
         _, open_pos = simulate(df, entry, exit_, max_hold,
-                               load_config()["etf"]["cost_round_trip"],
+                               cfg["etf"]["cost_round_trip"],
                                return_open=True, trailing=trailing)
-        if open_pos:
-            state = (f"보유 {open_pos['hold']}일째, 진입 {open_pos['entry_date'].date()} "
-                     f"@{open_pos['entry_price']:,.0f}, 평가 {open_pos['unrealized']:+.2%}")
-        elif enter_today:
-            state = "오늘 시가 진입 대기"
-        else:
-            state = "무포지션 · 신호 없음"
-        print(f"  [{cand['name']}] {cand['strategy']}: {state}")
-
-    _preview_rotation2(force)
+        out.append({"cand": cand, "enter_today": enter_today, "open_pos": open_pos,
+                    "last_close": float(df["Close"].iloc[-1]),
+                    "last_date": df.index[-1]})
+    return out
 
 
-def _preview_rotation2(force: bool = False) -> None:
-    """확장 로테이션 아침 상태: 보유 슬롯 + 리밸런스 임박 여부(월초 근사)."""
+def rotation2_state(force: bool = False) -> dict | None:
+    """확장 로테이션 상태 (프리뷰·브리핑 공용): 보유 슬롯 + 월초 리밸런스 여부."""
     cfg = load_config()
     if not cfg.get("etf_rotation2", {}).get("freeze"):
-        return
+        return None
     from .rotation import rotation2_episodes, rotation2_universe, select_targets
 
     _, open_pos, idx = rotation2_episodes(force)
-    held = ", ".join(f"{p['name']}({p['unrealized']:+.1%})" for p in open_pos) or "현금"
     # 마지막 확정 봉이 그 달의 월말이면(=오늘이 다음 달 첫 거래일이면) 오늘 리밸런스
-    rebalance_today = idx[-1].month != pd.Timestamp.today().month
-    line = f"  [로테이션] rotation2: 보유 {held}"
+    rebalance_today = bool(idx[-1].month != pd.Timestamp.today().month)
+    moves: list[str] = []
     if rebalance_today:
         from .data_loader import load_symbol
         r2 = cfg["etf_rotation2"]
-        closes = {n: load_symbol(str(c), "kr").loc[:idx[-1], "Close"]
-                  for c, n in rotation2_universe().items()}
-        closes = pd.DataFrame(closes)
+        closes = pd.DataFrame({n: load_symbol(str(c), "kr").loc[:idx[-1], "Close"]
+                               for c, n in rotation2_universe().items()})
         mom = (closes / closes.shift(r2["lookback"]) - 1).iloc[-1]
         target = select_targets(mom, r2["top_k"])
         cur = {p["name"] for p in open_pos}
-        moves = []
         if target - cur:
             moves.append("IN " + ", ".join(sorted(target - cur)))
         if cur - target:
             moves.append("OUT " + ", ".join(sorted(cur - target)))
-        line += " · 오늘 시가 리밸런스: " + ("; ".join(moves) or "변경 없음")
-    print(line)
+    return {"open_pos": open_pos, "rebalance_today": rebalance_today, "moves": moves}
+
+
+def _state_text(st: dict) -> str:
+    pos = st["open_pos"]
+    if pos:
+        return (f"보유 {pos['hold']}일째, 진입 {pos['entry_date'].date()} "
+                f"@{pos['entry_price']:,.0f}, 평가 {pos['unrealized']:+.2%}")
+    return "오늘 시가 진입 대기" if st["enter_today"] else "무포지션 · 신호 없음"
+
+
+def preview_etf(force: bool = False) -> None:
+    """아침용: 오늘 시가 진입 신호 여부 + 보유 포지션 상태."""
+    print("\n=== ETF swing preview (Stage 2 candidates) ===")
+    for st in candidate_states(force):
+        print(f"  [{st['cand']['name']}] {st['cand']['strategy']}: {_state_text(st)}")
+    rot = rotation2_state(force)
+    if rot:
+        held = (", ".join(f"{p['name']}({p['unrealized']:+.1%})"
+                          for p in rot["open_pos"]) or "현금")
+        line = f"  [로테이션] rotation2: 보유 {held}"
+        if rot["rebalance_today"]:
+            line += " · 오늘 시가 리밸런스: " + ("; ".join(rot["moves"]) or "변경 없음")
+        print(line)
