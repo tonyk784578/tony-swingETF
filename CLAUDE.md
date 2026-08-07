@@ -16,6 +16,8 @@
 ## 구조
 
 ```text
+GUIDE.md             # 초보자용 전체 설명서 — 사용자 대상 보고·설명은 이 문서의
+                     # 눈높이(쉬운 용어, 괄호 병기, 비유)를 따를 것
 config.yaml          # 모든 파라미터. 최상위 라이브 키(main_stock 등)와
                      # 동결 실험 섹션(ml/refine/sizing/stoploss)을 구분
 src/config.py        # 설정 로더 + 경로
