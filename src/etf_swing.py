@@ -88,6 +88,10 @@ def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) 
         return (fast > slow) & (fast.shift(1) <= slow.shift(1))
     if strategy == "rsi2":
         return rsi(close, p["period"]) < p["entry_below"]
+    if strategy == "pullback":
+        # 상승장 눌림목: 장기 추세(MA200) 위에서의 단기 과매도만 매수
+        trend_ok = close > close.rolling(p["trend_ma"]).mean()
+        return (rsi(close, p["period"]) < p["entry_below"]) & trend_ok
     if strategy == "us_dip":
         return us_ret_mapped.reindex(df.index) <= p["threshold"]
     if strategy == "trend_ride":
@@ -111,7 +115,7 @@ def build_flags(df: pd.DataFrame, strategy: str,
         fast = close.rolling(p["fast"]).mean()
         slow = close.rolling(p["slow"]).mean()
         return raw.shift(1), fast < slow, cfg["max_hold"]
-    if strategy == "rsi2":
+    if strategy in ("rsi2", "pullback"):
         return raw.shift(1), close > close.rolling(p["exit_ma"]).mean(), cfg["max_hold"]
     if strategy == "trend_ride":
         # 상승장 추세 라이더: 전략별 max_hold(60)가 기본 10일 캡을 대체 —

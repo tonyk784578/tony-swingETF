@@ -59,7 +59,7 @@ python -m src.main analysis        # 신호 세기 + 손실연도 진단 + 전�
 python -m src.main sizing          # 2단 사이징 실험 (사전 등록 — 재현용)
 python -m src.main minute          # 분봉 수집/append (evening cron에 포함)
 python -m src.main stoploss        # 손절 룰 검증 (발동일 30건부터 판정)
-python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 5전략)
+python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 6전략)
 python -m src.main portfolio       # [메인] Stage 2 후보 통합 계좌 시뮬 (MDD -8% 캘리브레이션)
 python -m src.main refine          # 개선 실험 재현 (레짐필터·청산 — 판정 완료, 재실행 금지)
 python -m src.main crash           # 폭락 사례 분해 + MA200 게이트 재현 (기각 판정 완료)
@@ -95,8 +95,8 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 
 ## 메인 트랙: ETF 스윙 (Stage 1 완료 2026-08-06)
 
-- `python -m src.main etf` — 유니버스 12종 x 5전략(breakout/macross/rsi2/us_dip,
-  trend_ride는 2026-08-07 추가) 스크리닝. 파라미터는 config `etf`
+- `python -m src.main etf` — 유니버스 12종 x 6전략(breakout/macross/rsi2/us_dip,
+  2026-08-07에 trend_ride·pullback 추가) 스크리닝. 파라미터는 config `etf`
   (탐색 단계 — 튜닝 반복 금지).
 - **Stage 1 결과** (results/etf_screening.md): 48조합 중 후보 4개 통과
   (N>=30, 전/후반 양수, t>=2) — KODEX200 breakout(t=2.60), KODEX_Auto
@@ -158,6 +158,17 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   - 채택분은 config `etf_paper.candidates`의 `exit` 필드에 반영 완료 (장부 0행 시점).
 - 코드: `candidate_flags()`가 exit 모드(ma/trail_only/ma_plus_trail)를 일괄 적용 —
   섀도·포트폴리오·프리뷰 모두 동일 규칙 사용.
+
+## 평균회귀 종결: pullback 실험 (2026-08-07 사전 등록 — 기각, 변형 재실험 금지)
+
+- 가설: 무필터 rsi2의 실패(0/12 — 승률 57~66%인데 MDD -22~-68%)는 하락장 과매도
+  매수 탓. Connors 표준형(RSI2<10 AND 종가>MA200, exit MA5)이면 성립할 것.
+- 결과: **메커니즘 진단은 정확** — 무필터 대비 평균 11/12, MDD 11/12, t 10/12 개선
+  (예: KODEX_Lev MDD -51.9→-18.8%). 그러나 **게이트 통과 0/12** (최고
+  KODEX_KOSDAQ150Lev t=1.72) — 하락장 손실을 제거해도 남는 엣지가 약함.
+- **결론: ETF 평균회귀 계열 종결.** 열화형(rsi2)·정식형(pullback)이 모두 기각됐다.
+  추가 변형(기간·임계값·필터 교체) 실험 금지 — 다중검정. 추세추종 집중이 데이터로
+  재확인됨. 스크리닝 누적 테스트 60 → 72.
 
 ## 폭락 대비 검토 (2026-08-07, `crash` 단계 — 판정 완료, 게이트 재실험 금지)
 

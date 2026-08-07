@@ -89,7 +89,7 @@ def test_build_flags_consistent_with_raw_signal():
     df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
                        "Close": close, "Volume": 100})
     us = pd.Series(0.0, index=idx)
-    for strat in ["breakout", "macross", "rsi2", "trend_ride"]:
+    for strat in ["breakout", "macross", "rsi2", "trend_ride", "pullback"]:
         raw = raw_entry_signal(df, strat, us)
         entry, _, _ = build_flags(df, strat, us)
         pd.testing.assert_series_equal(entry.fillna(False).astype(bool),
@@ -108,6 +108,33 @@ def test_trend_ride_blocks_bear_market_rally():
     us = pd.Series(0.0, index=idx)
     assert raw_entry_signal(df, "breakout", us).fillna(False).any()   # 반등이 신고가는 만든다
     assert not raw_entry_signal(df, "trend_ride", us).fillna(False).any()  # 그러나 정배열 아님
+
+
+def test_pullback_blocked_in_downtrend():
+    """하락장 과매도는 매수 금지 — 무필터 rsi2와의 차별점 (MA200 아래면 차단)."""
+    from src.etf_swing import raw_entry_signal
+    idx = pd.bdate_range("2023-01-01", periods=260)
+    close = pd.Series(400.0, index=idx) - pd.Series(range(260), index=idx, dtype=float)
+    df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
+                       "Close": close, "Volume": 100})
+    us = pd.Series(0.0, index=idx)
+    assert raw_entry_signal(df, "rsi2", us).fillna(False).any()      # 무필터는 계속 산다
+    assert not raw_entry_signal(df, "pullback", us).fillna(False).any()  # 눌림목은 차단
+
+
+def test_pullback_fires_on_dip_in_uptrend():
+    """상승추세(MA200 위) 중 급락 눌림에서는 진입 신호."""
+    from src.etf_swing import raw_entry_signal
+    idx = pd.bdate_range("2023-01-01", periods=260)
+    vals = [100.0 + 0.5 * i for i in range(257)] + [216.0, 212.0, 208.0]  # 3일 급락
+    close = pd.Series(vals, index=idx)
+    df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
+                       "Close": close, "Volume": 100})
+    us = pd.Series(0.0, index=idx)
+    raw = raw_entry_signal(df, "pullback", us)
+    assert raw.iloc[-1]             # 과매도 + MA200 위 → 진입
+    ma200 = close.rolling(200).mean().iloc[-1]
+    assert close.iloc[-1] > ma200   # 전제 확인: 급락에도 장기 추세는 위
 
 
 def test_trend_ride_uptrend_signals_and_holds():
