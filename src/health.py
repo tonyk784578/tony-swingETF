@@ -33,31 +33,99 @@ def _ok(msg: str) -> bool:
     return True
 
 
-def _stale(code: str, label: str) -> bool | None:
-    """캐시 지연 검사. True=최신, False=경고, None=파일 없음."""
+def _hcfg() -> dict:
+    return load_config().get("health", {})
+
+
+def _lag_busdays(code: str) -> tuple[int, str] | None:
+    """캐시 마지막 봉의 영업일 지연. None=파일 없음. (KR 공휴일 미반영 — 연휴 주간
+    오탐 가능하나, 놓침보다 오탐이 낫다.)"""
     path = DATA_DIR / f"{code}.parquet"
     if not path.exists():
         return None
     last = pd.read_parquet(path).index.max()
-    lag = int(np.busday_count(last.date(), pd.Timestamp.today().date()))
-    if lag > 3:
-        return _warn(f"{label} 데이터가 {lag}영업일 전({last.date()})에서 멈춤 — "
+    return int(np.busday_count(last.date(), pd.Timestamp.today().date())), str(last.date())
+
+
+def _stale(code: str, label: str) -> bool | None:
+    """캐시 지연 검사. True=최신, False=경고, None=파일 없음."""
+    res = _lag_busdays(code)
+    if res is None:
+        return None
+    lag, last = res
+    if lag > _hcfg().get("stale_busdays", 3):
+        return _warn(f"{label} 데이터가 {lag}영업일 전({last})에서 멈춤 — "
                      "cron/데이터소스 확인")
-    return _ok(f"{label} 데이터 최신 ({last.date()}, {lag}영업일 전)")
+    return _ok(f"{label} 데이터 최신 ({last}, {lag}영업일 전)")
 
 
 def check_data_freshness() -> bool:
-    """주력 종목 + 첫 ETF 후보 캐시가 최근 3영업일 내 데이터를 갖고 있는가."""
+    """판정 표본을 만드는 모든 캐시의 신선도.
+
+    개별 후보 하나(예: 저유동성 KOSEF)만 데이터가 멈춰도 그 후보의 표본이
+    조용히 누락된다 — 주력종목 + **스윙 후보 전 코드**를 개별 검사하고,
+    로테이션 유니버스는 최악 지연 하나로 요약 검사한다.
+    """
     cfg = load_config()
     stock_code = next(code for code, name in cfg["data"]["kr_stocks"].items()
                       if name == cfg["main_stock"])
-    etf = cfg["etf_paper"]["candidates"][0]
+    targets = [(str(stock_code), cfg["main_stock"])]
+    seen = {str(stock_code)}
+    for cand in cfg["etf_paper"]["candidates"]:
+        code = str(cand["code"])
+        if code not in seen:
+            seen.add(code)
+            targets.append((code, cand["name"]))
     ok = True
-    for code, label in [(str(stock_code), cfg["main_stock"]),
-                        (str(etf["code"]), etf["name"])]:
+    for code, label in targets:
         res = _stale(code, label)
         ok = _warn(f"{label} 캐시 없음 — download 실행 필요") if res is None else (res and ok)
+
+    if cfg.get("etf_rotation2", {}).get("freeze"):
+        from .rotation import rotation2_universe
+
+        lags = {}
+        missing = []
+        for code, name in rotation2_universe().items():
+            res = _lag_busdays(str(code))
+            if res is None:
+                missing.append(name)
+            else:
+                lags[name] = res[0]
+        if missing:
+            ok = _warn(f"로테이션 유니버스 캐시 없음: {', '.join(missing)}")
+        elif lags:
+            worst = max(lags, key=lags.get)
+            if lags[worst] > _hcfg().get("stale_busdays", 3):
+                ok = _warn(f"로테이션 유니버스 데이터 지연 — 최악 {worst} "
+                           f"{lags[worst]}영업일 (홀딩 선정이 왜곡될 수 있음)")
+            else:
+                _ok(f"로테이션 유니버스 {len(lags)}종 최신 (최악 {lags[worst]}영업일)")
     return ok
+
+
+def check_snapshot_commit() -> bool:
+    """Phase C 장부 자동 커밋이 살아있는가 — evening 스크립트의 `|| true`가
+    실패를 삼키므로, 마지막 paper/ 커밋 시점을 밖에서 감시해야 한다.
+    (아침 프리뷰가 preview_signals.csv 를 매 평일 갱신하므로 커밋도 매일 있어야 정상.)
+    """
+    import subprocess
+
+    max_age = _hcfg().get("snapshot_max_age_days", 7)
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(ROOT_DIR), "log", "-1", "--format=%ct", "--", "paper/"],
+            capture_output=True, text=True, timeout=10, check=False)
+        ts = out.stdout.strip()
+        if not ts:
+            return _warn("paper/ 커밋 이력 없음 — 장부 스냅샷 자동 커밋 확인")
+        age = (pd.Timestamp.now() - pd.Timestamp(int(ts), unit="s")).days
+        if age > max_age:
+            return _warn(f"마지막 장부 스냅샷 커밋이 {age}일 전 — evening cron의 "
+                         "git 자동 커밋 실패 의심")
+        return _ok(f"장부 스냅샷 커밋 최신 ({age}일 전)")
+    except Exception as e:  # noqa: BLE001 — git 부재 등: 감시 실패가 헬스체크를 깨면 안 됨
+        return _warn(f"장부 스냅샷 커밋 확인 실패: {e}")
 
 
 def check_evening_log() -> bool:
@@ -74,7 +142,7 @@ def check_evening_log() -> bool:
         return _warn("최근 로그에 evening 실행 기록 없음")
     age = (pd.Timestamp.today().normalize()
            - pd.Timestamp(latest.stem)).days
-    if age > 5:
+    if age > _hcfg().get("log_max_age_days", 5):
         return _warn(f"마지막 실행 로그가 {age}일 전({latest.stem}) — WSL/cron 확인")
     return _ok(f"실행 로그 최신 ({latest.stem})")
 
@@ -84,9 +152,10 @@ def check_revisions() -> bool:
     path = DATA_DIR / "revisions.log"
     if not path.exists():
         return _ok("데이터 정정 이력 없음")
+    window = _hcfg().get("revision_window_days", 7)
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     recent = [ln for ln in lines
-              if pd.Timestamp(ln[:10]) >= pd.Timestamp.today() - pd.Timedelta(days=7)]
+              if pd.Timestamp(ln[:10]) >= pd.Timestamp.today() - pd.Timedelta(days=window)]
     if recent:
         return _warn(f"최근 7일 내 데이터 정정 {len(recent)}건 — 백테스트/장부 재검토 필요 "
                      f"(data/revisions.log)")
@@ -215,18 +284,34 @@ def market_regime() -> None:
         print(f"  {r['name']}: {r['dd']:+.1%}{mark}")
 
 
-def _notify_desktop(title: str, msg: str) -> None:
-    """Windows 풍선 알림 — best-effort. 실패해도 헬스체크 결과에 영향 없음."""
+def _ps_quote(text: str, limit: int = 200) -> str:
+    """PowerShell 단일따옴표 문자열에 안전하게 넣을 수 있도록 정제.
+
+    문자열은 명령줄에 보간되므로 인젝션 표면이다. 단일따옴표 문자열에서
+    특수 의미를 갖는 것은 `'` 뿐이지만(백틱·$ 는 리터럴), 방어적으로
+    제어문자도 제거하고 길이를 캡한다 — 경고 메시지에는 외부 유래 문자열
+    (데이터소스 에러 메시지 등)이 섞일 수 있다.
+    """
+    clean = "".join(ch for ch in text if ch.isprintable()).replace("'", " ")
+    return clean[:limit]
+
+
+def _notify_desktop(title: str, msg: str, icon: str = "Warning") -> None:
+    """Windows 풍선 알림 — best-effort. 실패해도 헬스체크 결과에 영향 없음.
+
+    icon: Warning(경고) | Info(신호 알림 등 정보성)
+    """
     ps = Path("/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe")
     if not ps.exists():
         return
-    safe = msg.replace("'", " ")
+    icon = icon if icon in ("Warning", "Info") else "Warning"
+    sys_icon = {"Warning": "Warning", "Info": "Information"}[icon]
     script = (
         "Add-Type -AssemblyName System.Windows.Forms;"
         "$n=New-Object System.Windows.Forms.NotifyIcon;"
-        "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
-        f"$n.ShowBalloonTip(20000,'{title}','{safe}',"
-        "[System.Windows.Forms.ToolTipIcon]::Warning);"
+        f"$n.Icon=[System.Drawing.SystemIcons]::{sys_icon};$n.Visible=$true;"
+        f"$n.ShowBalloonTip(20000,'{_ps_quote(title, 60)}','{_ps_quote(msg)}',"
+        f"[System.Windows.Forms.ToolTipIcon]::{icon});"
         "Start-Sleep -Seconds 8;$n.Dispose()")
     try:
         subprocess.run([str(ps), "-NoProfile", "-Command", script],
@@ -256,7 +341,8 @@ def _publish_alert(warnings: list[str]) -> None:
 def run_health() -> None:
     print("=== health check ===")
     _WARNINGS.clear()
-    results = [check_data_freshness(), check_evening_log(), check_revisions()]
+    results = [check_data_freshness(), check_evening_log(), check_revisions(),
+               check_snapshot_commit()]
     rows = verdict_readiness()
     market_regime()
     n_warn = len(results) - sum(results)

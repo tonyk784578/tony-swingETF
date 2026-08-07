@@ -67,6 +67,8 @@ def simulate_rotation(opens: pd.DataFrame, closes: pd.DataFrame, lookback: int,
                 "hold": idx.get_loc(e) - idx.get_loc(pos["entry_date"]),
                 "net_ret": px / pos["entry_price"] - 1 - cost,
             })
+        # 신규 진입 충원은 이름 정렬 순(결정적). 슬롯 부족은 청산 불가 이월(px NaN)
+        # 때만 발생하는 희귀 케이스라 모멘텀순 우선충원은 두지 않는다 — 규칙 단순 유지
         for name in sorted(target - set(positions)):
             if len(positions) >= top_k:
                 break

@@ -239,8 +239,10 @@ def rotation2_state(force: bool = False) -> dict | None:
     from .rotation import rotation2_episodes, rotation2_universe, select_targets
 
     _, open_pos, idx = rotation2_episodes(force)
-    # 마지막 확정 봉이 그 달의 월말이면(=오늘이 다음 달 첫 거래일이면) 오늘 리밸런스
-    rebalance_today = bool(idx[-1].month != pd.Timestamp.today().month)
+    # 마지막 확정 봉이 그 달의 월말이면(=오늘이 다음 달 첫 거래일이면) 오늘 리밸런스.
+    # (연,월) 비교 — 월만 비교하면 데이터가 12개월 밀렸을 때 같은 달로 오인한다
+    today = pd.Timestamp.today()
+    rebalance_today = bool((idx[-1].year, idx[-1].month) != (today.year, today.month))
     moves: list[str] = []
     if rebalance_today:
         from .data_loader import load_symbol

@@ -205,6 +205,14 @@ etf_rotation2:
   judgment_t: 1.729          # t(0.95, df=19)
   judgment_power_note: "34%"
 
+health:
+  # 헬스체크 임계값 (운영 파라미터 — 코드 하드코딩 금지 규칙 준수)
+  stale_busdays: 3            # 가격 캐시 허용 지연 (KR 공휴일 미반영 — 연휴 오탐 감수)
+  log_max_age_days: 5         # evening 로그 최대 나이
+  revision_window_days: 7     # 데이터 정정 경고 감시 창
+  snapshot_max_age_days: 7    # paper/ 자동 커밋 최대 나이 (Phase C 생존 감시 —
+                              # 아침 preview_signals 갱신으로 평일 매일 커밋이 정상)
+
 etf_paper:
   # Stage 2 사전 등록 (2026-08-06 동결) — Stage 1 스크리닝 통과 후보 4개.
   # freeze_date 이후 진입분만 아웃오브샘플. 후보 변경 시 freeze 갱신, ledger 보존.

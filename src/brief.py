@@ -120,4 +120,4 @@ def write_status(mode: str, force: bool = False, notify: bool = False) -> None:
         if rot and rot["rebalance_today"] and rot["moves"]:
             msgs.append("로테이션 리밸런스: " + "; ".join(rot["moves"]))
         if msgs:
-            _notify_desktop("TonySwingETF 오늘 신호", " · ".join(msgs))
+            _notify_desktop("TonySwingETF 오늘 신호", " · ".join(msgs), icon="Info")
