@@ -60,40 +60,49 @@ def run_judge() -> None:
     cost_map = _load_judgment_costs(cfg)
     led = load_etf_ledger()
 
-    swing_keys = {(c["name"], c["strategy"]) for c in cfg["etf_paper"]["candidates"]}
-    swing = (led[pd.MultiIndex.from_frame(led[["name", "strategy"]]).isin(swing_keys)]
-             if len(led) else led)
+    # 계열(family)별 판정 — 메커니즘이 다른 전략(추세추종/캘린더)을 한 풀에 섞으면
+    # 시험이 오염되므로, 후보의 family 필드(기본 trend)로 풀을 가른다 (v2.1)
+    fam_of = {(c["name"], c["strategy"]): c.get("family", "trend")
+              for c in cfg["etf_paper"]["candidates"]}
+    for fam, rule in jcfg["families"].items():
+        members = [k for k, f in fam_of.items() if f == fam]
+        fam_led = (led[pd.MultiIndex.from_frame(led[["name", "strategy"]])
+                       .isin(set(members))] if len(led) else led)
+        pooled_n, fam_t = rule["pooled_n"], rule["t"]
+        print(f"=== [{fam}] 계열 판정 (후보 {len(members)}개 풀링 — 절차 동결본) ===")
+        if len(fam_led) < pooled_n:
+            print(f"  판정 시점 아님 — 완결 {len(fam_led)}/{pooled_n}건 "
+                  f"(도달 시 이 명령이 그대로 판정)")
+        else:
+            sample = first_n_by_completion(fam_led, pooled_n)
+            r = adjust_costs(sample, cost_flat, cost_map)
+            t = one_sided_t(r)
+            ok = bool(r.mean() > 0 and t >= fam_t)
+            print(f"  표본: 완결 순 처음 {pooled_n}건 "
+                  f"(마지막 청산 {sample['exit_date'].max().date()})")
+            print(f"  풀링 평균 {r.mean():+.3%} | 단측 t={t:.2f} (임계 {fam_t})")
+            verdict = ("통과 — 후보별 부호 규칙으로 채택 결정" if ok
+                       else "기각 — 계열 실거래 불가 (재검정 금지)")
+            print(f"  ▶ 계열 판정: {verdict}")
 
-    print("=== ETF 스윙 계열 판정 (사전 등록 v2 — 절차 동결본) ===")
-    pooled_n, family_t = jcfg["pooled_n"], jcfg["family_t"]
-    if len(swing) < pooled_n:
-        print(f"  판정 시점 아님 — 완결 {len(swing)}/{pooled_n}건 "
-              f"(도달 시 이 명령이 그대로 판정)")
-    else:
-        sample = first_n_by_completion(swing, pooled_n)
-        r = adjust_costs(sample, cost_flat, cost_map)
-        t = one_sided_t(r)
-        ok = bool(r.mean() > 0 and t >= family_t)
-        print(f"  표본: 완결 순 처음 {pooled_n}건 (마지막 청산 {sample['exit_date'].max().date()})")
-        print(f"  풀링 평균 {r.mean():+.3%} | 단측 t={t:.2f} (임계 {family_t})")
-        verdict = ("통과 — 후보별 부호 규칙으로 채택 결정" if ok
-                   else "기각 — 계열 실거래 불가 (재검정 금지)")
-        print(f"  ▶ 계열 판정: {verdict}")
+        if len(members) > 1:   # 단일 후보 계열은 계열 판정 = 후보 판정
+            print(f"\n=== [{fam}] 후보별 채택/제거 (부호 규칙 — 계열 통과가 전제) ===")
+            cand_need = jcfg["per_candidate_min"]
+            for name, strat in members:
+                sub = (fam_led[(fam_led["name"] == name)
+                               & (fam_led["strategy"] == strat)]
+                       if len(fam_led) else fam_led)
+                label = f"{name} {strat}"
+                if len(sub) < cand_need:
+                    print(f"  {label:34s} 표본 대기 {len(sub)}/{cand_need}")
+                    continue
+                r = adjust_costs(first_n_by_completion(sub, cand_need),
+                                 cost_flat, cost_map)
+                verdict = "채택 후보 (계열 통과 시)" if r.mean() > 0 else "제거"
+                print(f"  {label:34s} 처음 {cand_need}건 평균 {r.mean():+.3%} → {verdict}")
+        print()
 
-    print("\n=== 후보별 채택/제거 (부호 규칙 — 계열 통과가 전제) ===")
-    cand_need = jcfg["per_candidate_min"]
-    for c in cfg["etf_paper"]["candidates"]:
-        sub = (swing[(swing["name"] == c["name"]) & (swing["strategy"] == c["strategy"])]
-               if len(swing) else swing)
-        label = f"{c['name']} {c['strategy']}"
-        if len(sub) < cand_need:
-            print(f"  {label:34s} 표본 대기 {len(sub)}/{cand_need}")
-            continue
-        r = adjust_costs(first_n_by_completion(sub, cand_need), cost_flat, cost_map)
-        verdict = "채택 후보 (계열 통과 시)" if r.mean() > 0 else "제거"
-        print(f"  {label:34s} 처음 {cand_need}건 평균 {r.mean():+.3%} → {verdict}")
-
-    print("\n=== rotation2 판정 (독립 계열 — 단독 단측 t, 1회) ===")
+    print("=== rotation2 판정 (독립 계열 — 단독 단측 t, 1회) ===")
     r2 = cfg["etf_rotation2"]
     rot = led[led["strategy"] == "rotation2"] if len(led) else led
     need, crit = r2["judgment_min"], r2["judgment_t"]

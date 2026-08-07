@@ -217,6 +217,11 @@ def candidate_states(force: bool = False) -> list[dict]:
             latest_us = us_returns(load_symbol("^IXIC", "us")).iloc[-1]
             thr = cfg["etf"]["strategies"]["us_dip"]["threshold"]
             enter_today = bool(latest_us <= thr)
+        elif cand["strategy"] == "tom":
+            # 오늘 진입 = 오늘이 월초 첫 거래일 = 마지막 확정 봉과 (연,월)이 다름.
+            # 일반 분기(raw 마지막 값)는 '마지막 봉이 월초였나'라 하루 어긋난다
+            today, last = pd.Timestamp.today(), df.index[-1]
+            enter_today = bool((today.year, today.month) != (last.year, last.month))
         else:
             # 마지막 확정 봉의 raw 신호 = '다음 개장(오늘) 진입' — 백테스트와 동일 함수
             raw = raw_entry_signal(df, cand["strategy"], pd.Series(dtype=float))

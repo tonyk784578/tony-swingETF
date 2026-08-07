@@ -239,7 +239,7 @@ def cmd_etf(force: bool) -> None:
     print(f"\nStage-2 후보 (N>=30, 전/후반 양수, t>=2): {len(passed)}개")
     print("report:", RESULTS_DIR / "etf_screening.md")
 
-    from .etf_swing import run_ext_screening
+    from .etf_swing import run_ext_screening, write_strategy_compare
 
     ext = run_ext_screening(force)
     if ext is not None:
@@ -250,9 +250,17 @@ def cmd_etf(force: bool) -> None:
                          formatters={"avg_hold": "{:.1f}".format, "mean": pct,
                                      "win": "{:.1%}".format, "cum": "{:+.1%}".format,
                                      "mdd": "{:.1%}".format, "t_stat": "{:.2f}".format}))
+
         ext_pass = ext[ext["rankable"] & ext["sign_holds"] & (ext["t_stat"] >= 2)]
         print(f"확장 통과 (게이트 동일): {len(ext_pass)}개")
         print("report:", RESULTS_DIR / "etf_ext_screening.md")
+
+    compare = write_strategy_compare()
+    print("\n=== 전략별 최종 성과 비교 ===")
+    print(compare.to_string(index=False,
+                            formatters={"통과율": "{:.0%}".format,
+                                        "평균수익(전조합)": "{:+.2%}".format}))
+    print("report:", RESULTS_DIR / "strategy_compare.md")
 
 
 def cmd_portfolio(force: bool) -> None:

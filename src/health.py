@@ -185,15 +185,17 @@ def readiness_rows() -> list[dict]:
                  "indent": 1, "ready_msg": "판정 가능! `paper` 요약으로 판정"})
 
     etf_led = load_etf_ledger()
-    # [1] 계열 판정 — 스윙 후보 전체 풀링 (rotation2 제외). 판정 규칙 v2:
-    #     pooled_n 도달 시 풀링 평균>0 AND 단측 t>=family_t, 1회 검정.
-    swing = {(c["name"], c["strategy"]) for c in cfg["etf_paper"]["candidates"]}
-    n_family = 0 if etf_led.empty else int(
-        pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(swing).sum())
-    family_need = jcfg.get("pooled_n", pooled_need)
-    rows.append({"label": "ETF 계열 판정(전 후보 풀링, 단측 t검정)", "n": n_family,
-                 "need": family_need, "indent": 1,
-                 "ready_msg": "계열 판정 시점 도달! `python -m src.main judge` 실행"})
+    # [1] 계열(family)별 판정 — 후보의 family 필드(기본 trend)로 풀을 가른다 (v2.1).
+    #     각 계열: pooled_n 도달 시 풀링 평균>0 AND 단측 t, 1회 검정.
+    fam_of = {(c["name"], c["strategy"]): c.get("family", "trend")
+              for c in cfg["etf_paper"]["candidates"]}
+    for fam, rule in jcfg.get("families", {}).items():
+        members = {k for k, f in fam_of.items() if f == fam}
+        n_fam = 0 if etf_led.empty else int(
+            pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(members).sum())
+        rows.append({"label": f"ETF [{fam}] 계열 판정({len(members)}후보 풀링, 단측 t)",
+                     "n": n_fam, "need": rule["pooled_n"], "indent": 1,
+                     "ready_msg": "계열 판정 시점 도달! `python -m src.main judge` 실행"})
     # 합산 30건 중간점검은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
     # 이후 추가된 후보(별도 freeze 보유)의 트레이드가 섞이면 의미가 깨지므로 제외
     base = {(c["name"], c["strategy"])

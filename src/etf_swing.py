@@ -98,6 +98,13 @@ def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) 
         fast = close.rolling(p["trend_fast"]).mean()
         slow = close.rolling(p["trend_slow"]).mean()
         return (close > close.rolling(p["lookback"]).max().shift(1)) & (fast > slow)
+    if strategy == "tom":
+        # 월초 첫 거래일 = 직전 거래일과 (연,월)이 다름. us_dip처럼 그 자체가
+        # 'D 시가 진입' 플래그다 (달력 정보는 D 개장 전에 확정 — shift 불필요)
+        per = pd.Series(df.index.to_period("M"), index=df.index)
+        flag = per.ne(per.shift(1))
+        flag.iloc[0] = False   # 데이터 첫 행은 월초 여부를 판별할 수 없음
+        return flag
     raise ValueError(strategy)
 
 
@@ -121,7 +128,7 @@ def build_flags(df: pd.DataFrame, strategy: str,
         # 상승장 추세 라이더: 전략별 max_hold(60)가 기본 10일 캡을 대체 —
         # 추세 이탈(종가<MA20) 전까지 보유를 연장하는 것이 가설의 핵심
         return raw.shift(1), close < close.rolling(p["exit_ma"]).mean(), p["max_hold"]
-    # us_dip: raw 가 곧 진입 플래그, 고정 보유일 청산
+    # us_dip / tom: raw 가 곧 진입 플래그, 고정 보유일 청산
     return raw, pd.Series(False, index=df.index), p["hold_days"]
 
 
@@ -237,6 +244,79 @@ def _screen_report(df: pd.DataFrame, header: str, gate_note: str, stem: str) -> 
         lines.append("| (통과 후보 없음) | | | | | | | | | | |")
     lines.append(f"\n전체 표는 `{stem}.csv` (t-stat 내림차순).")
     (RESULTS_DIR / f"{stem}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# 전략별 계열 상태 (판정 이력의 요약 — 상세 근거는 CLAUDE.md·results/*.md)
+_STRATEGY_STATUS = {
+    "breakout":   "Stage 2 섀도 중 (후보 3)",
+    "macross":    "Stage 2 섀도 중 (후보 1)",
+    "trend_ride": "Stage 2 섀도 중 (후보 3)",
+    "rsi2":       "종결 — 무필터 평균회귀 기각 (0/12)",
+    "pullback":   "종결 — 필터형 평균회귀도 기각 (0/12)",
+    "us_dip":     "종결 — 기각",
+    "tom":        "1/12 통과 (KODEX_Gold) — Stage 2 섀도. 주의: 주식 가설인데 금만 통과",
+}
+
+
+def write_strategy_compare() -> pd.DataFrame:
+    """전략별 최종 성과 비교표 — 스크리닝 CSV(본+확장)와 로테이션 에피소드를
+    전략 단위로 묶어 한 표로. 어떤 계열이 살아남았는지 한눈에 보는 용도."""
+    frames = []
+    for stem in ("etf_screening", "etf_ext_screening"):
+        path = RESULTS_DIR / f"{stem}.csv"
+        if path.exists():
+            frames.append(pd.read_csv(path))
+    allc = pd.concat(frames, ignore_index=True)
+
+    rows = []
+    for strat, g in allc.groupby("strategy"):
+        gate = g[(g["n"] >= load_config()["etf"]["min_trades"]) & g["sign_holds"]
+                 & (g["t_stat"] >= 2)]
+        best = g.loc[g["t_stat"].idxmax()]
+        rows.append({
+            "전략": strat, "시험조합": len(g), "게이트통과": len(gate),
+            "통과율": len(gate) / len(g),
+            "평균수익(전조합)": g["mean"].mean(),
+            "최고후보": f"{best['etf']} (평균 {best['mean']:+.2%}, t={best['t_stat']:.2f})",
+            "상태": _STRATEGY_STATUS.get(strat, "-"),
+        })
+    # 로테이션은 조합 스크리닝이 아니라 단일 실험 — 에피소드로 같은 통계 산출
+    for stem, label, status in [
+            ("rotation_episodes", "rotation(12종)", "기각 — 유니버스 고상관"),
+            ("rotation2_episodes", "rotation2(확장)", "통과 — Stage 2 섀도 중")]:
+        path = RESULTS_DIR / f"{stem}.csv"
+        if not path.exists():
+            continue
+        ep = pd.read_csv(path)
+        st = combo_stats(ep["net_ret"])
+        rows.append({"전략": label, "시험조합": 1,
+                     "게이트통과": 1 if "통과" in status else 0,
+                     "통과율": 1.0 if "통과" in status else 0.0,
+                     "평균수익(전조합)": st["mean"],
+                     "최고후보": f"에피소드 {st['n']}건 (평균 {st['mean']:+.2%}, "
+                                f"t={st['t_stat']:.2f})",
+                     "상태": status})
+
+    out = pd.DataFrame(rows).sort_values(["게이트통과", "평균수익(전조합)"],
+                                         ascending=False).reset_index(drop=True)
+    lines = [f"""# 전략별 최종 성과 비교
+
+생성일: {pd.Timestamp.today().date()} | 근거: etf_screening.csv + etf_ext_screening.csv
++ rotation 에피소드 | 게이트 = N>=30, 전/후반 모두 양수, t>=2
+
+읽는 법: '게이트통과'가 0이면 그 전략 계열은 이 유니버스에서 검증 실패.
+평균수익은 시험한 전 조합의 단순 평균이라 낮게 보이는 게 정상 — 실제 채택은
+통과 후보만. **과거 성적표이며, 실전 투입은 포워드 판정(judge) 통과가 전제.**
+
+| 전략 | 시험조합 | 통과 | 통과율 | 평균수익 | 최고 후보 | 상태 |
+|---|---|---|---|---|---|---|"""]
+    for _, r in out.iterrows():
+        lines.append(f"| {r['전략']} | {r['시험조합']} | {r['게이트통과']} "
+                     f"| {r['통과율']:.0%} | {r['평균수익(전조합)']:+.2%} "
+                     f"| {r['최고후보']} | {r['상태']} |")
+    (RESULTS_DIR / "strategy_compare.md").write_text("\n".join(lines) + "\n",
+                                                     encoding="utf-8")
+    return out
 
 
 def _write_report(df: pd.DataFrame) -> None:

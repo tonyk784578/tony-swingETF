@@ -93,10 +93,20 @@ def run_costs() -> None:
     cost_flat = cfg["etf"]["cost_round_trip"]
     path = RESULTS_DIR / "etf_costs.csv"
     if path.exists():
-        # 판정용 비용표는 생성 시점 동결 — 재실행해도 덮어쓰지 않는다.
+        # 판정용 비용표는 생성 시점 동결 — 기존 행은 재측정하지 않는다.
         # (데이터가 늘어난 뒤 재생성하면 판정 직전 비용 선택이 가능해져 등록이 깨짐)
+        # 단, 이후 편입된 신규 후보는 장부가 쌓이기 전 최초 1회만 측정해 append —
+        # 신규 종목 추가는 사후 선택이 아니다.
         est = pd.read_csv(path, dtype={"code": str})
-        print(f"기존 동결 비용표 사용: {path} (재생성 안 함)")
+        fresh = estimate_costs()
+        new = fresh[~fresh["code"].isin(set(est["code"]))]
+        if len(new):
+            est = pd.concat([est, new], ignore_index=True)
+            est.to_csv(path, index=False, encoding="utf-8-sig")
+            print(f"동결 비용표에 신규 후보 {len(new)}건 추가: "
+                  + ", ".join(new["name"]) + " (기존 행 불변)")
+        else:
+            print(f"기존 동결 비용표 사용: {path} (재생성 안 함)")
     else:
         est = estimate_costs()
         est.to_csv(path, index=False, encoding="utf-8-sig")
