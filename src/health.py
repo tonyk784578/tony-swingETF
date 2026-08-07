@@ -1,19 +1,30 @@
 """시스템 헬스체크 + 판정 준비 상태 — 침묵 실패 감지용.
 
 evening cron 마지막에 실행. [WARN] 라인이 있으면 사람이 확인해야 한다.
-(알림 채널이 없는 동안에는 로그 grep이 유일한 통로 — grep WARN paper/logs/*.log)
+
+경고 통보는 세 겹이다: 로그 라인(`grep WARN paper/logs/*.log`),
+프로젝트 루트의 `ALERT.md`(경고가 있는 동안에만 존재 — 파일 존재 자체가 상태),
+그리고 Windows 풍선 알림(best-effort). 판정까지 1~3년을 무인 관측하는 구조라
+경고가 로그에 묻히면 표본이 조용히 깨진 채로 몇 달이 지날 수 있다.
 """
 
 from __future__ import annotations
+
+import subprocess
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from .config import DATA_DIR, ROOT_DIR, load_config
 
+ALERT_PATH = ROOT_DIR / "ALERT.md"
+_WARNINGS: list[str] = []
+
 
 def _warn(msg: str) -> bool:
     print(f"[WARN] {msg}")
+    _WARNINGS.append(msg)
     return False
 
 
@@ -129,9 +140,49 @@ def verdict_readiness() -> None:
         print(f"  손절 검증 집계 실패: {e}")
 
 
+def _notify_desktop(title: str, msg: str) -> None:
+    """Windows 풍선 알림 — best-effort. 실패해도 헬스체크 결과에 영향 없음."""
+    ps = Path("/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe")
+    if not ps.exists():
+        return
+    safe = msg.replace("'", " ")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$n=New-Object System.Windows.Forms.NotifyIcon;"
+        "$n.Icon=[System.Drawing.SystemIcons]::Warning;$n.Visible=$true;"
+        f"$n.ShowBalloonTip(20000,'{title}','{safe}',"
+        "[System.Windows.Forms.ToolTipIcon]::Warning);"
+        "Start-Sleep -Seconds 8;$n.Dispose()")
+    try:
+        subprocess.run([str(ps), "-NoProfile", "-Command", script],
+                       timeout=40, capture_output=True, check=False)
+    except Exception as e:            # 알림 실패가 헬스체크를 깨뜨리면 안 된다
+        print(f"  (데스크톱 알림 실패 — 무시: {e})")
+
+
+def _publish_alert(warnings: list[str]) -> None:
+    """경고 상태를 눈에 띄는 파일로 게시. 정상으로 돌아오면 지운다."""
+    if not warnings:
+        ALERT_PATH.unlink(missing_ok=True)
+        return
+    stamp = pd.Timestamp.now(tz="Asia/Seoul").strftime("%Y-%m-%d %H:%M")
+    body = "\n".join(f"- {w}" for w in warnings)
+    ALERT_PATH.write_text(
+        f"# 헬스체크 경고 {len(warnings)}건\n\n"
+        f"최종 감지: {stamp} (KST)\n\n{body}\n\n"
+        "---\n\n"
+        "이 파일은 `python -m src.main health` 가 경고를 감지하는 동안에만 존재하며,\n"
+        "정상으로 돌아오면 자동으로 삭제된다. 직접 지우지 말고 원인을 먼저 확인할 것.\n",
+        encoding="utf-8")
+    print(f"\n[ALERT] {ALERT_PATH.name} 게시 — 경고 {len(warnings)}건")
+    _notify_desktop("TonySwingETF", f"헬스체크 경고 {len(warnings)}건 — ALERT.md 확인")
+
+
 def run_health() -> None:
     print("=== health check ===")
+    _WARNINGS.clear()
     results = [check_data_freshness(), check_evening_log(), check_revisions()]
     verdict_readiness()
     n_warn = len(results) - sum(results)
     print(f"\nhealth: {'모두 정상' if n_warn == 0 else f'경고 {n_warn}건 — 위 [WARN] 확인'}")
+    _publish_alert(_WARNINGS)
