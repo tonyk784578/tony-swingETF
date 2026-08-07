@@ -258,6 +258,23 @@ def cmd_refine(force: bool) -> None:
     print("\nreport:", RESULTS_DIR / "refinements.md")
 
 
+def cmd_rotation(force: bool) -> None:
+    from .rotation import run_rotation
+
+    res = run_rotation(force)
+    v = res["verdict"]
+    for label, st in [("전체", v["full"]), ("전반", v["first"]), ("후반", v["second"])]:
+        print(f"{label}: N={st['n']}  평균 {st['mean']:+.3%}  승률 {st['win_rate']:.1%}  "
+              f"t {st['t_stat']:.2f}")
+    print(f"판정(Stage 1 기준): {'통과' if v['passed'] else '기각'}")
+    print(f"계좌: CAGR {res['stats']['cagr']:+.2%}  MDD {res['stats']['mdd']:.1%}  "
+          f"Sharpe {res['stats']['sharpe']:.2f}  "
+          f"(KODEX200 B&H: {res['bench']['cagr']:+.2%} / {res['bench']['mdd']:.1%} / "
+          f"{res['bench']['sharpe']:.2f})")
+    print("현재 시그널:", ", ".join(res["now_target"]) or "현금")
+    print("report:", RESULTS_DIR / "rotation.md")
+
+
 def cmd_crash(force: bool) -> None:
     from .crash_study import run_crash_study
 
@@ -306,7 +323,8 @@ def main() -> None:
     parser.add_argument("step",
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
-                                 "etf", "portfolio", "refine", "crash", "health", "all"])
+                                 "etf", "portfolio", "refine", "crash", "rotation",
+                                 "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -328,6 +346,7 @@ def main() -> None:
         "portfolio": lambda: cmd_portfolio(args.force),
         "refine": lambda: cmd_refine(args.force),
         "crash": lambda: cmd_crash(args.force),
+        "rotation": lambda: cmd_rotation(args.force),
         "health": cmd_health,
     }
     if args.step == "all":

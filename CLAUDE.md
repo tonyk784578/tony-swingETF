@@ -36,6 +36,7 @@ src/etf_paper.py     # [ETF] Stage 2 섀도 장부 (리플레이 방식)
 src/portfolio.py     # [ETF] 통합 계좌 시뮬 (승률 비중 + MDD 캘리브레이션)
 src/refinements.py   # [ETF] 레짐필터·청산 실험 (동결·판정 완료)
 src/crash_study.py   # [ETF] 폭락 사례 연구 + MA200 게이트 (판정 완료·기각)
+src/rotation.py      # [ETF] 듀얼 모멘텀 로테이션 (판정 완료·기각)
 src/health.py        # 헬스체크 + 판정 준비 상태
 src/main.py          # CLI (디스패치 테이블)
 paper/ledger.csv     # 섀도 장부 — 삭제/재생성 금지 (etf_ledger.csv 동일)
@@ -63,6 +64,7 @@ python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 6
 python -m src.main portfolio       # [메인] Stage 2 후보 통합 계좌 시뮬 (MDD -8% 캘리브레이션)
 python -m src.main refine          # 개선 실험 재현 (레짐필터·청산 — 판정 완료, 재실행 금지)
 python -m src.main crash           # 폭락 사례 분해 + MA200 게이트 재현 (기각 판정 완료)
+python -m src.main rotation        # 듀얼 모멘텀 로테이션 재현 (기각 판정 완료)
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
 python -m src.main all             # download → verify → report 일괄
@@ -169,6 +171,21 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 - **결론: ETF 평균회귀 계열 종결.** 열화형(rsi2)·정식형(pullback)이 모두 기각됐다.
   추가 변형(기간·임계값·필터 교체) 실험 금지 — 다중검정. 추세추종 집중이 데이터로
   재확인됨. 스크리닝 누적 테스트 60 → 72.
+
+## 로테이션 실험: 듀얼 모멘텀 (2026-08-07 사전 등록 — 기각, 재실험 금지)
+
+- 규칙(문헌 표준형): 월말 252일 모멘텀 상위 3종(절대 모멘텀>0만) 익일 시가
+  동일비중 리밸런스, 유니버스는 etf.universe 12종 그대로. `rotation` 단계.
+- 결과 (results/rotation.md): 에피소드 N=63, 평균 +7.08%, **t=1.83 미달로 기각**
+  (전/후반 평균은 둘 다 양수). 계좌 관점도 CAGR +16.0% vs B&H +14.9%로 근소한
+  대신 **MDD -54.2% vs -40.8%, Sharpe 0.64 vs 0.71** — 리스크 조정 열위.
+  상위 3에 레버리지 ETF가 자주 포함돼 폭락을 정통으로 맞는 구조.
+- top_k·룩백 변경 재실험 금지(그리드서치). 유니버스가 12종·고상관이라 횡단면
+  분산이 부족한 것이 구조적 원인 — 로테이션 재시도는 유니버스 확장(예: 해외
+  자산군 ETF)이라는 새 가설로만.
+- **US 섹터 갭(SOX→Semicon)은 미구현 종결**: 서브 트랙 개별주 갭 파이프라인이
+  동일 가설(미국 반도체 야간 신호 → 다음날 KR)을 더 순수한 수단(SKHynix 등)으로
+  이미 섀도 검증 중 — ETF 중복 구현은 다중검정만 추가하므로 하지 않는다.
 
 ## 폭락 대비 검토 (2026-08-07, `crash` 단계 — 판정 완료, 게이트 재실험 금지)
 
