@@ -124,7 +124,7 @@ def readiness_rows() -> list[dict]:
     family_need = jcfg.get("pooled_n", pooled_need)
     rows.append({"label": "ETF 계열 판정(전 후보 풀링, 단측 t검정)", "n": n_family,
                  "need": family_need, "indent": 1,
-                 "ready_msg": "계열 판정 시점 도달! `paper` 요약 + etf_costs 비용으로 t 계산"})
+                 "ready_msg": "계열 판정 시점 도달! `python -m src.main judge` 실행"})
     # 합산 30건 중간점검은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
     # 이후 추가된 후보(별도 freeze 보유)의 트레이드가 섞이면 의미가 깨지므로 제외
     base = {(c["name"], c["strategy"])
