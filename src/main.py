@@ -258,6 +258,31 @@ def cmd_refine(force: bool) -> None:
     print("\nreport:", RESULTS_DIR / "refinements.md")
 
 
+def cmd_crash(force: bool) -> None:
+    from .crash_study import run_crash_study
+
+    res = run_crash_study(force)
+    pct = "{:+.1%}".format
+    print(f"=== 폭락 사례 (60일 고점 -10% 이탈, ETF별) — {len(res['episodes'])}건 ===")
+    print(res["episodes"].to_string(index=False,
+                                    formatters={"trough_dd": "{:.1%}".format}))
+    print("\n=== 손익 분해 (사례 밖 / 폭락 중 진입 / 보유 중 피격) ===")
+    print(res["decomposition"][["name", "strategy", "n", "total", "outside_sum",
+                                "entered_in_n", "entered_in_sum",
+                                "held_into_n", "held_into_sum", "worst_in_ep"]]
+          .to_string(index=False,
+                     formatters={c: pct for c in ["total", "outside_sum", "entered_in_sum",
+                                                  "held_into_sum", "worst_in_ep"]}))
+    print("\n=== MA200 게이트 판정 ===")
+    print(res["gate"][["name", "strategy", "base_n", "gate_n", "base_mean", "gate_mean",
+                       "base_mdd", "gate_mdd", "base_t", "gate_t", "adopted"]]
+          .to_string(index=False,
+                     formatters={c: "{:+.3%}".format for c in ["base_mean", "gate_mean"]}
+                     | {c: "{:.1%}".format for c in ["base_mdd", "gate_mdd"]}
+                     | {c: "{:.2f}".format for c in ["base_t", "gate_t"]}))
+    print("\nreport:", RESULTS_DIR / "crash_study.md")
+
+
 def cmd_health() -> None:
     from .health import run_health
 
@@ -280,8 +305,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="US gap pattern backtest")
     parser.add_argument("step",
                         choices=["download", "verify", "backtest", "robustness", "report",
-                                 "paper", "ml", "analysis", "sizing", "minute",
-                                 "stoploss", "etf", "portfolio", "refine", "health", "all"])
+                                 "paper", "ml", "analysis", "sizing", "minute", "stoploss",
+                                 "etf", "portfolio", "refine", "crash", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -302,6 +327,7 @@ def main() -> None:
         "etf": lambda: cmd_etf(args.force),
         "portfolio": lambda: cmd_portfolio(args.force),
         "refine": lambda: cmd_refine(args.force),
+        "crash": lambda: cmd_crash(args.force),
         "health": cmd_health,
     }
     if args.step == "all":

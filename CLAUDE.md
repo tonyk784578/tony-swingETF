@@ -35,6 +35,7 @@ src/etf_swing.py     # [ETF] 전략 신호·스윙 엔진·스크리닝·후보 
 src/etf_paper.py     # [ETF] Stage 2 섀도 장부 (리플레이 방식)
 src/portfolio.py     # [ETF] 통합 계좌 시뮬 (승률 비중 + MDD 캘리브레이션)
 src/refinements.py   # [ETF] 레짐필터·청산 실험 (동결·판정 완료)
+src/crash_study.py   # [ETF] 폭락 사례 연구 + MA200 게이트 (판정 완료·기각)
 src/health.py        # 헬스체크 + 판정 준비 상태
 src/main.py          # CLI (디스패치 테이블)
 paper/ledger.csv     # 섀도 장부 — 삭제/재생성 금지 (etf_ledger.csv 동일)
@@ -58,9 +59,10 @@ python -m src.main analysis        # 신호 세기 + 손실연도 진단 + 전�
 python -m src.main sizing          # 2단 사이징 실험 (사전 등록 — 재현용)
 python -m src.main minute          # 분봉 수집/append (evening cron에 포함)
 python -m src.main stoploss        # 손절 룰 검증 (발동일 30건부터 판정)
-python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 4전략)
-python -m src.main portfolio       # [메인] 후보 4개 통합 계좌 시뮬 (MDD -8% 캘리브레이션)
+python -m src.main etf             # [메인] ETF 스윙 스크리닝 (12종 x 5전략)
+python -m src.main portfolio       # [메인] Stage 2 후보 통합 계좌 시뮬 (MDD -8% 캘리브레이션)
 python -m src.main refine          # 개선 실험 재현 (레짐필터·청산 — 판정 완료, 재실행 금지)
+python -m src.main crash           # 폭락 사례 분해 + MA200 게이트 재현 (기각 판정 완료)
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
 python -m src.main all             # download → verify → report 일괄
@@ -93,8 +95,9 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 
 ## 메인 트랙: ETF 스윙 (Stage 1 완료 2026-08-06)
 
-- `python -m src.main etf` — 유니버스 12종 x 4전략(breakout/macross/rsi2/us_dip)
-  스크리닝. 파라미터는 config `etf` (탐색 단계 — 튜닝 반복 금지).
+- `python -m src.main etf` — 유니버스 12종 x 5전략(breakout/macross/rsi2/us_dip,
+  trend_ride는 2026-08-07 추가) 스크리닝. 파라미터는 config `etf`
+  (탐색 단계 — 튜닝 반복 금지).
 - **Stage 1 결과** (results/etf_screening.md): 48조합 중 후보 4개 통과
   (N>=30, 전/후반 양수, t>=2) — KODEX200 breakout(t=2.60), KODEX_Auto
   macross(t=2.40), KODEX_Lev breakout(t=2.35), TIGER_NASDAQ100 breakout(t=2.19).
@@ -107,6 +110,30 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   상태 표시. 아침 preview: 오늘 시가 진입 신호 + 보유 현황. cron 변경 불필요.
   주의: 2026년 6~7월 폭락 구간 리플레이에서 돌파 전략이 큰 손실(레버리지 -23.7%)
   — 최근 레짐이 돌파에 불리했음. 포워드 판정 전까지 실거래 금지.
+
+## 신규 전략: trend_ride — 상승장 추세 라이더 (2026-08-07 사전 등록)
+
+- **가설**: 돌파 계열이 지배적인데 최대보유 10일 캡이 추세 이익을 자른다.
+  중기 정배열(MA20>MA60) 상승장에서만 20일 신고가로 진입, 추세 이탈(종가<MA20)까지
+  보유 연장(캡 60일)하면 트레이드당 이익이 커진다. 파라미터는 전부 기존 관례/표준값
+  (신고가 20일=breakout 관례, 20/60=월/분기 이평) — **튜닝 없이 1회 실행 판정**.
+  스크리닝 누적 테스트 수 48 → 60.
+- **결과** (results/etf_screening.md): 12조합 중 게이트(N>=30, 전/후반 양수, t>=2)
+  통과 2건 — KODEX200(+2.92%/트레이드 = breakout의 3.1배, 보유 18.3일, t=2.10),
+  TIGER_NASDAQ100(+1.19% = 2.3배, t=2.21). 둘 다 후반부(2021~)가 더 강함.
+  대가는 MDD 증가(TIGER -8.8→-19.0%). KODEX_Lev는 평균 +4.9%지만 t=1.73 미달로
+  기각(사후 구제 금지). KODEX_Inverse 음수 — 상승추세 전략이 인버스에 안 맞는 건
+  구조적으로 타당(신호 정의의 방증).
+- **Stage 2 편입**: 통과 2건을 `etf_paper.candidates`에 **자체 freeze 2026-08-07**로
+  등록 (후보별 freeze 필드 — 기존 4후보의 08-06 동결·아웃오브샘플 구간 불변).
+  헬스체크 합산 30건은 08-06 계열만 집계(등록 당시 의미 보존). trend_ride 판정은
+  후보별 20건으로만 — 빈도 3.8~6.2건/년이라 **약 3.2~5.3년 소요** (장기 관측 전제,
+  그 전 실거래 금지).
+- **전략 선택 구조** (향후 자동매매 대비): 전략 정의는 이름 단위로 등록
+  (config `etf.strategies` + `raw_entry_signal` 분기), 실행 대상 선택은
+  `etf_paper.candidates`의 (code, strategy, exit, freeze) 행 단위.
+  자동매매(KIS 연동)가 구현되면 이 목록에서 판정 통과 후보를 골라 실행한다 —
+  별도 선택 메커니즘을 새로 만들지 말 것.
 
 ## 코드·보안·구조 검토 (2026-08-06 완료)
 
@@ -132,6 +159,27 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 - 코드: `candidate_flags()`가 exit 모드(ma/trail_only/ma_plus_trail)를 일괄 적용 —
   섀도·포트폴리오·프리뷰 모두 동일 규칙 사용.
 
+## 폭락 대비 검토 (2026-08-07, `crash` 단계 — 판정 완료, 게이트 재실험 금지)
+
+- `python -m src.main crash` — 폭락 사례 검출(자체 60일 고점 대비 -10%, 20영업일
+  병합), 후보별 손익 분해, MA200 게이트 실험 재현. 상세: results/crash_study.md
+- 사례: ETF별 12~24건, 독립 거시 사건 ~10건 (2015-08 위안화, 2016-01, 2018 Q4,
+  2020-03 코로나, 2021~22 약세장, 2024-08 엔캐리, 2025-04, **2026-02~08 진행 중** —
+  KODEX200 저점 -40.8%, 레버리지 -68.4%로 코로나보다 깊음).
+- **진단: 폭락 구간은 이 시스템의 주 손실원이 아니다.** 폭락 중 진입 합산이 후보별로
+  양수(+14.8~+22.2%)거나 소폭 음수(-1.5~-6.8%) — 하락 중엔 신고가/크로스가 안 떠
+  진입이 급감하고, MA/trailing 청산이 이익을 안고 탈출한다 (KODEX200 trend_ride는
+  2026 폭락 시작일에 +27.3%/+28.5% 청산). 잔여 위험은 레버리지 단일 트레이드
+  꼬리(-23.7%)와 계좌 MTM 변동.
+- **MA200 게이트: 6/6 기각** — 폭락 진입이 손실원이 아니라서 게이트는 이익만 깎았다
+  (KODEX_Auto t 2.65→1.98 등). 변동성비 필터(기각)에 이어 **진입 차단형 대책 2종
+  모두 기각. 추가 진입 필터 실험은 다중검정 낭비 — 금지.**
+- 방어층 정리 (전부 기존 유지): 청산 규율(MA 이탈 + trailing -5% 채택 2후보),
+  trend_ride 정배열 게이트, 포트폴리오 총노출 0.53(-8% MDD 캘리브레이션) +
+  동일 그룹 중복 금지, 실전 시 여유(0.8배) 권고.
+- **추가된 운영 대책**: `health`에 시장 레짐 라인 — 후보 ETF의 60일 고점 대비 낙폭과
+  폭락 구간 여부를 매 저녁 표시 (정보성, ALERT 미발동 — 관측은 폭락 중에도 계속).
+
 ## 포트폴리오 규칙 (2026-08-06 등록 — config `portfolio`)
 
 - `python -m src.main portfolio` — Stage 2 후보 4개를 한 계좌로 운용하는 시뮬레이션.
@@ -141,6 +189,10 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   **총노출 0.53에서 MDD -8.0%, CAGR +6.7%, Sharpe 1.66** (full 1.0이면 CAGR +12.8%, MDD -14.5%).
   주의: 과거 최악 기준 조정이며 미래 보장은 아님 — 실전은 여유를 둘 것.
 - 그룹 중복 스킵이 470건 중 114건 — 200/레버리지 중복 통제가 실제로 작동.
+- **2026-08-07 재캘리브레이션** (trend_ride 2후보 편입 후): 총노출 0.53에서
+  MDD -8.0%, CAGR +6.58%, Sharpe 1.44. 그룹 중복 스킵 263건 — 동일 ETF의
+  breakout/trend_ride 중복도 통제됨. 4후보 기준 기록(0.53/+6.7%/1.39)은 08-06
+  등록치로 보존.
 
 ## 운영: 헬스체크 (`health` — evening cron 마지막에 자동 실행)
 

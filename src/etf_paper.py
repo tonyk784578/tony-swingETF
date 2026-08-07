@@ -39,16 +39,20 @@ def _candidate_frames(force: bool = False):
 def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict]]:
     cfg = load_config()
     cost = cfg["etf"]["cost_round_trip"]
-    freeze = pd.Timestamp(cfg["etf_paper"]["freeze_date"])
     ledger = load_etf_ledger()
 
     new_rows = []
     status = []
     for cand, df, entry, exit_, max_hold, trailing in _candidate_frames(force):
+        # 후보별 freeze — 나중에 등록된 후보(예: trend_ride 2026-08-07)는 자기
+        # 등록일 이후만 아웃오브샘플. 기존 후보의 freeze는 건드리지 않는다.
+        freeze = pd.Timestamp(cand.get("freeze", cfg["etf_paper"]["freeze_date"]))
         trades, open_pos = simulate(df, entry, exit_, max_hold, cost,
                                     return_open=True, trailing=trailing)
-        insample = combo_stats(trades.set_index("entry_date")["net_ret"]
-                               [lambda s: s.index < freeze]) if len(trades) else None
+        insample = None
+        if len(trades):
+            r = trades.set_index("entry_date")["net_ret"]
+            insample = combo_stats(r[r.index < freeze])
         # freeze 당일 진입은 제외(>) — 그날 신호는 후보 선정에 쓴 데이터에서 나온다
         fwd = trades[trades["entry_date"] > freeze] if len(trades) else trades
         done = set()

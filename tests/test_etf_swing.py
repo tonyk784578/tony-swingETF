@@ -84,14 +84,41 @@ def test_trailing_stop_exit():
 def test_build_flags_consistent_with_raw_signal():
     """백테스트 진입 플래그 = raw 신호의 다음날 — 프리뷰와 정의가 갈라지면 안 된다."""
     from src.etf_swing import build_flags, raw_entry_signal
-    idx = pd.bdate_range("2024-01-01", periods=60)
-    close = pd.Series(100.0, index=idx) + pd.Series(range(60), index=idx, dtype=float)
+    idx = pd.bdate_range("2024-01-01", periods=90)
+    close = pd.Series(100.0, index=idx) + pd.Series(range(90), index=idx, dtype=float)
     df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
                        "Close": close, "Volume": 100})
     us = pd.Series(0.0, index=idx)
-    for strat in ["breakout", "macross", "rsi2"]:
+    for strat in ["breakout", "macross", "rsi2", "trend_ride"]:
         raw = raw_entry_signal(df, strat, us)
         entry, _, _ = build_flags(df, strat, us)
         pd.testing.assert_series_equal(entry.fillna(False).astype(bool),
                                        raw.shift(1).fillna(False).astype(bool),
                                        check_names=False)
+
+
+def test_trend_ride_blocks_bear_market_rally():
+    """20일 신고가라도 MA20<=MA60(정배열 아님)이면 진입 금지 — 상승장 필터의 핵심."""
+    from src.etf_swing import raw_entry_signal
+    idx = pd.bdate_range("2024-01-01", periods=75)
+    vals = [200.0 - 2 * i for i in range(60)] + [82.0 + 3 * (i + 1) for i in range(15)]
+    close = pd.Series(vals, index=idx)
+    df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
+                       "Close": close, "Volume": 100})
+    us = pd.Series(0.0, index=idx)
+    assert raw_entry_signal(df, "breakout", us).fillna(False).any()   # 반등이 신고가는 만든다
+    assert not raw_entry_signal(df, "trend_ride", us).fillna(False).any()  # 그러나 정배열 아님
+
+
+def test_trend_ride_uptrend_signals_and_holds():
+    """지속 상승장: 신고가+정배열 → 진입 신호, 추세 유지 중 청산 플래그 없음, 캡 60일."""
+    from src.etf_swing import build_flags, raw_entry_signal
+    idx = pd.bdate_range("2024-01-01", periods=90)
+    close = pd.Series(100.0, index=idx) + pd.Series(range(90), index=idx, dtype=float)
+    df = pd.DataFrame({"Open": close, "High": close + 1, "Low": close - 1,
+                       "Close": close, "Volume": 100})
+    us = pd.Series(0.0, index=idx)
+    assert raw_entry_signal(df, "trend_ride", us).iloc[-1]
+    _, exit_, max_hold = build_flags(df, "trend_ride", us)
+    assert not exit_.iloc[-1]      # 종가 > MA20 인 동안은 청산 없음
+    assert max_hold == 60          # 사전 등록 값 — config 변조 시 테스트가 잡는다

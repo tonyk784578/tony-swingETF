@@ -90,6 +90,10 @@ def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) 
         return rsi(close, p["period"]) < p["entry_below"]
     if strategy == "us_dip":
         return us_ret_mapped.reindex(df.index) <= p["threshold"]
+    if strategy == "trend_ride":
+        fast = close.rolling(p["trend_fast"]).mean()
+        slow = close.rolling(p["trend_slow"]).mean()
+        return (close > close.rolling(p["lookback"]).max().shift(1)) & (fast > slow)
     raise ValueError(strategy)
 
 
@@ -109,6 +113,10 @@ def build_flags(df: pd.DataFrame, strategy: str,
         return raw.shift(1), fast < slow, cfg["max_hold"]
     if strategy == "rsi2":
         return raw.shift(1), close > close.rolling(p["exit_ma"]).mean(), cfg["max_hold"]
+    if strategy == "trend_ride":
+        # 상승장 추세 라이더: 전략별 max_hold(60)가 기본 10일 캡을 대체 —
+        # 추세 이탈(종가<MA20) 전까지 보유를 연장하는 것이 가설의 핵심
+        return raw.shift(1), close < close.rolling(p["exit_ma"]).mean(), p["max_hold"]
     # us_dip: raw 가 곧 진입 플래그, 고정 보유일 청산
     return raw, pd.Series(False, index=df.index), p["hold_days"]
 

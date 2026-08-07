@@ -113,8 +113,13 @@ def verdict_readiness() -> None:
           + ("  ← 판정 가능! `paper` 요약으로 판정" if n_stock >= need else ""))
 
     etf_led = load_etf_ledger()
-    n_etf = len(etf_led)
-    print(f"  ETF 합산(계열 중간점검): {n_etf}/{pooled_need}"
+    # 합산 30건 기준은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
+    # 이후 추가된 후보(별도 freeze 보유)의 트레이드가 섞이면 의미가 깨지므로 제외
+    base = {(c["name"], c["strategy"])
+            for c in cfg["etf_paper"]["candidates"] if "freeze" not in c}
+    n_etf = 0 if etf_led.empty else int(
+        pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(base).sum())
+    print(f"  ETF 합산(08-06 계열 중간점검): {n_etf}/{pooled_need}"
           + ("  ← 중간점검 가능 (계열 생존 확인용 — 실거래 채택 근거 아님)"
              if n_etf >= pooled_need else ""))
     for cand in cfg["etf_paper"]["candidates"]:
@@ -138,6 +143,30 @@ def verdict_readiness() -> None:
                  else ""))
     except Exception as e:
         print(f"  손절 검증 집계 실패: {e}")
+
+
+def market_regime() -> None:
+    """시장 레짐 정보 라인 — 폭락 구간 무인 관측 보조 (경고 아님, ALERT 미발동).
+
+    후보 ETF가 crash_study 사례 정의(60일 고점 대비 -10%)에 들어와 있으면 표시만
+    한다. 판단·차단은 하지 않는다 — 섀도 관측은 폭락 구간에서도 계속되어야 한다.
+    """
+    cfg = load_config()
+    p = cfg["crash_study"]["episode"]
+    print("\n=== 시장 레짐 (60일 고점 대비 — 정보성) ===")
+    seen: set[str] = set()
+    for cand in cfg["etf_paper"]["candidates"]:
+        code = str(cand["code"])
+        if code in seen:
+            continue
+        seen.add(code)
+        path = DATA_DIR / f"{code}.parquet"
+        if not path.exists():
+            continue
+        close = pd.read_parquet(path)["Close"]
+        dd = close.iloc[-1] / close.rolling(p["lookback"], min_periods=1).max().iloc[-1] - 1
+        mark = "  ← 폭락 구간 (섀도 손익 변동 커짐 — 관측은 계속)" if dd < p["drawdown"] else ""
+        print(f"  {cand['name']}: {dd:+.1%}{mark}")
 
 
 def _notify_desktop(title: str, msg: str) -> None:
@@ -183,6 +212,7 @@ def run_health() -> None:
     _WARNINGS.clear()
     results = [check_data_freshness(), check_evening_log(), check_revisions()]
     verdict_readiness()
+    market_regime()
     n_warn = len(results) - sum(results)
     print(f"\nhealth: {'모두 정상' if n_warn == 0 else f'경고 {n_warn}건 — 위 [WARN] 확인'}")
     _publish_alert(_WARNINGS)

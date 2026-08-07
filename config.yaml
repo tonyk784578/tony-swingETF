@@ -98,10 +98,22 @@ etf:
     us_dip:                 # 미국장 연계: 나스닥 전일 -1.5% 이하 → 시가 매수, 3일 보유
       threshold: -0.015
       hold_days: 3
+    trend_ride:             # 추세추종(장기): 상승장 추세 라이더 — 2026-08-07 사전 등록
+      # 가설: 돌파 계열이 지배적인데 최대보유 10일 캡이 추세 이익을 자른다.
+      # 중기 상승장(MA20>MA60 정배열)에서 20일 신고가로 진입하고, 추세 이탈
+      # (종가<MA20)까지 보유를 연장하면 트레이드당 이익이 커질 것이다.
+      # 파라미터는 전부 기존 관례/표준값 재사용 — 그리드서치 금지, 1회 실행 판정.
+      lookback: 20          # 진입 신고가 창 (breakout과 동일 관례)
+      trend_fast: 20        # 정배열 빠른 이평 (월)
+      trend_slow: 60        # 정배열 느린 이평 (분기)
+      exit_ma: 20           # 추세 이탈 청산선 = trend_fast
+      max_hold: 60          # 안전 상한(~3개월) — 전략별 값이 기본 10일 캡을 대체
 
 etf_paper:
   # Stage 2 사전 등록 (2026-08-06 동결) — Stage 1 스크리닝 통과 후보 4개.
   # freeze_date 이후 진입분만 아웃오브샘플. 후보 변경 시 freeze 갱신, ledger 보존.
+  # 나중에 추가된 후보는 자체 freeze 필드를 갖는다(기존 후보 동결 불변) —
+  # 향후 자동매매의 전략 선택은 이 목록에서 (code, strategy, exit) 단위로 고른다.
   freeze_date: "2026-08-06"
   ledger: paper/etf_ledger.csv
   trailing_stop: 0.05   # 채택된 exit 변형의 라이브 파라미터 (refine 섹션은 재현용 사본)
@@ -121,6 +133,11 @@ etf_paper:
     - {code: "091180", name: KODEX_Auto, strategy: macross, exit: ma_plus_trail}
     - {code: "122630", name: KODEX_Lev, strategy: breakout}
     - {code: "133690", name: TIGER_NASDAQ100, strategy: breakout, exit: trail_only}
+    # trend_ride 계열 (2026-08-07 등록) — Stage 1 12조합 중 사전 선언 게이트
+    # (N>=30, 전/후반 양수, t>=2) 통과분 전부, 사후 선별 없음. 과거 빈도
+    # 3.8~6.2건/년 → 후보별 20건 판정까지 약 3.2~5.3년 (장기 관측 전제).
+    - {code: "069500", name: KODEX200, strategy: trend_ride, freeze: "2026-08-07"}
+    - {code: "133690", name: TIGER_NASDAQ100, strategy: trend_ride, freeze: "2026-08-07"}
 
 portfolio:
   # 포트폴리오 시뮬레이션 규칙 (2026-08-06 등록)
@@ -151,6 +168,21 @@ refine:
     # 가설: 트레일링 스탑이 고정 MA 이탈보다 추세 이익을 길게 지킨다
     # 변형 2개만: trailing 단독 / MA+trailing 결합. 채택 기준: 전/후반 각각 t-stat 개선
     trailing_stop: 0.05     # 보유 중 최고 종가 대비 -5%
+
+crash_study:
+  # 폭락 사례 연구 + 방어 게이트 실험 (2026-08-07 사전 등록 — 1회 실행 판정).
+  # Part 1 사례 정의(기술적 진단): 자체 종가가 60일 고점 대비 -10% 이하인 구간,
+  #   20영업일 이내 재이탈은 같은 사례로 병합. 진단이며 통계적 선택 아님.
+  # Part 2 확증 실험: MA200 게이트 — 신규 진입은 전일 종가 > 200일 이평일 때만
+  #   (보유분은 유지). 기각된 refine.regime_filter(변동성비)와 다른 메커니즘(추세
+  #   레벨)이고 200일은 표준값 — 그리드서치 금지. 가설이 사례 진단과 같은 인샘플에서
+  #   나왔으므로 채택돼도 확증력은 제한적, 최종 판정은 포워드.
+  # 채택 기준(refine 레짐 필터와 동일): 전/후반 각각 t-stat 유지·개선 AND MDD 개선.
+  episode:
+    lookback: 60
+    drawdown: -0.10
+    merge_gap: 20
+  gate_ma: 200
 
 analysis:
   # 신호 세기 분석: 주력 조건 발동일을 NVDA 하락폭 구간으로 쪼개 단조성 확인

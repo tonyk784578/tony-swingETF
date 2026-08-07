@@ -1,0 +1,4 @@
+﻿date,stock,condition,triggered,open,close,gap,net_ret,weight
+2026-08-07 00:00:00,SKHynix,nvda_down2 & gap_down,False,1521000,1422000,0.017391,,0.5
+2026-08-07 00:00:00,SKHynix,nvda_down2 & kospi_down,False,1521000,1422000,0.017391,,0.5
+2026-08-07 00:00:00,SKHynix,sox_down1 & nvda_down2,False,1521000,1422000,0.017391,,0.5
