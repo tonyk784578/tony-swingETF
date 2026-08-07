@@ -116,7 +116,16 @@ def readiness_rows() -> list[dict]:
                  "indent": 1, "ready_msg": "판정 가능! `paper` 요약으로 판정"})
 
     etf_led = load_etf_ledger()
-    # 합산 30건 기준은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
+    # [1] 계열 판정 — 스윙 후보 전체 풀링 (rotation2 제외). 판정 규칙 v2:
+    #     pooled_n 도달 시 풀링 평균>0 AND 단측 t>=family_t, 1회 검정.
+    swing = {(c["name"], c["strategy"]) for c in cfg["etf_paper"]["candidates"]}
+    n_family = 0 if etf_led.empty else int(
+        pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(swing).sum())
+    family_need = jcfg.get("pooled_n", pooled_need)
+    rows.append({"label": "ETF 계열 판정(전 후보 풀링, 단측 t검정)", "n": n_family,
+                 "need": family_need, "indent": 1,
+                 "ready_msg": "계열 판정 시점 도달! `paper` 요약 + etf_costs 비용으로 t 계산"})
+    # 합산 30건 중간점검은 2026-08-06 동결 4후보(38.9건/년)로 캘리브레이션된 수치 —
     # 이후 추가된 후보(별도 freeze 보유)의 트레이드가 섞이면 의미가 깨지므로 제외
     base = {(c["name"], c["strategy"])
             for c in cfg["etf_paper"]["candidates"] if "freeze" not in c}
@@ -128,9 +137,9 @@ def readiness_rows() -> list[dict]:
     for cand in cfg["etf_paper"]["candidates"]:
         n = 0 if etf_led.empty else int(((etf_led["name"] == cand["name"])
                                          & (etf_led["strategy"] == cand["strategy"])).sum())
-        rows.append({"label": f"후보별(실거래 판정) {cand['name']} {cand['strategy']}",
+        rows.append({"label": f"후보별(채택/제거 부호 규칙) {cand['name']} {cand['strategy']}",
                      "n": n, "need": cand_need, "indent": 2,
-                     "ready_msg": "실거래 채택 판정 가능"})
+                     "ready_msg": "부호 규칙 적용 가능 (계열 판정 통과가 전제)"})
     r2 = cfg.get("etf_rotation2", {})
     if r2.get("freeze"):
         n_rot = 0 if etf_led.empty else int((etf_led["strategy"] == "rotation2").sum())

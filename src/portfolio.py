@@ -89,6 +89,31 @@ def _simulate_portfolio(trades: list[dict], e_max: float,
     return pd.Series(daily).sort_index(), diag
 
 
+def _bootstrap_mdd_q(port: pd.Series, bcfg: dict) -> tuple[float, dict]:
+    """블록 부트스트랩 MDD 분위수. 반환: (하위 quantile MDD, 분포 요약).
+
+    실현 MDD는 단일 경로의 극값이라 추정 분산이 가장 큰 통계량이다 —
+    실측 -8.0%의 부트스트랩 분포는 5%~95% 구간이 [-11.9%, -5.0%]에 이른다.
+    점추정 대신 하위 분위수(보수 쪽 꼬리)에 노출을 맞춘다. 블록 샘플링은
+    장기 레짐 지속성을 끊으므로 실제 꼬리는 이보다 더 나쁠 수 있다(하한 아님).
+    """
+    import numpy as np
+
+    r = port.to_numpy()
+    block = int(bcfg["block_days"])
+    n_blocks = int(np.ceil(len(r) / block))
+    rng = np.random.default_rng(int(bcfg["seed"]))
+    mdds = np.empty(int(bcfg["draws"]))
+    for k in range(len(mdds)):
+        idx = rng.integers(0, len(r) - block, n_blocks)
+        path = np.concatenate([r[i:i + block] for i in idx])
+        eq = np.cumprod(1 + path)
+        mdds[k] = float((eq / np.maximum.accumulate(eq) - 1).min())
+    q = float(np.quantile(mdds, bcfg["quantile"]))
+    dist = {p: float(np.quantile(mdds, p)) for p in (0.05, 0.25, 0.5, 0.75, 0.95)}
+    return q, dist
+
+
 def _stats(port: pd.Series) -> dict:
     equity = (1 + port).cumprod()
     mdd = (equity / equity.cummax() - 1).min()
@@ -105,22 +130,39 @@ def run_portfolio(force: bool = False) -> dict:
 
     port1, _ = _simulate_portfolio(trades, pcfg["max_gross_exposure"], calendar)
     st1 = _stats(port1)
-    # 반복 캘리브레이션: 복리 비선형성 때문에 1-pass 스케일링은 목표를 살짝
-    # 초과할 수 있어, MDD가 목표 이하로 들어올 때까지 축소(최대 4회)
-    e_final = min(pcfg["max_gross_exposure"],
+    # 1단계 — 실현 MDD 기준 반복 캘리브레이션 (2026-08-06 등록 방식, 비교용 유지):
+    # 복리 비선형성 때문에 1-pass 스케일링은 목표를 살짝 초과할 수 있어,
+    # MDD가 목표 이하로 들어올 때까지 축소(최대 4회)
+    e_point = min(pcfg["max_gross_exposure"],
                   pcfg["max_gross_exposure"] * abs(pcfg["target_mdd"]) / abs(st1["mdd"]))
     for _ in range(4):
-        port2, diag = _simulate_portfolio(trades, e_final, calendar)
+        port2, diag = _simulate_portfolio(trades, e_point, calendar)
         st2 = _stats(port2)
         if st2["mdd"] >= pcfg["target_mdd"]:
             break
-        e_final *= abs(pcfg["target_mdd"]) / abs(st2["mdd"])
+        e_point *= abs(pcfg["target_mdd"]) / abs(st2["mdd"])
 
-    pd.DataFrame({"full_exposure": st1["equity"], "calibrated": st2["equity"]}) \
+    # 2단계 — 부트스트랩 분위수 기준 (2026-08-07 개정, 권고 노출):
+    # 실현 경로 하나의 MDD가 아니라 같은 수익률 분포에서 뽑은 경로들의
+    # 하위 분위수 MDD를 목표에 맞춘다. 실현 -8.0%는 분포의 ~30퍼센타일에
+    # 불과했다 — 점추정 캘리브레이션은 노출을 과대 산정한다.
+    bcfg = pcfg["bootstrap"]
+    e_final = e_point
+    for _ in range(6):
+        port3, diag3 = _simulate_portfolio(trades, e_final, calendar)
+        st3 = _stats(port3)
+        q_mdd, dist = _bootstrap_mdd_q(port3, bcfg)
+        if q_mdd >= pcfg["target_mdd"] * 1.001:
+            break
+        e_final *= abs(pcfg["target_mdd"]) / abs(q_mdd)
+
+    pd.DataFrame({"full_exposure": st1["equity"], "calibrated": st2["equity"],
+                  "quantile_calibrated": st3["equity"]}) \
         .to_csv(RESULTS_DIR / "portfolio_equity.csv", encoding="utf-8-sig")
-    _plot(st1["equity"], st2["equity"], e_final)
-    _write_report(st1, st2, e_final, diag, pcfg)
-    return {"full": st1, "calibrated": st2, "e_final": e_final, "diag": diag}
+    _plot(st1["equity"], st3["equity"], e_final)
+    _write_report(st1, st2, st3, e_point, e_final, q_mdd, dist, diag3, pcfg)
+    return {"full": st1, "point": st2, "calibrated": st3,
+            "e_point": e_point, "e_final": e_final, "q_mdd": q_mdd, "diag": diag3}
 
 
 def _plot(eq1: pd.Series, eq2: pd.Series, e_final: float) -> None:
@@ -145,7 +187,10 @@ def _plot(eq1: pd.Series, eq2: pd.Series, e_final: float) -> None:
     plt.close(fig)
 
 
-def _write_report(st1: dict, st2: dict, e_final: float, diag: dict, pcfg: dict) -> None:
+def _write_report(st1: dict, st2: dict, st3: dict, e_point: float, e_final: float,
+                  q_mdd: float, dist: dict, diag: dict, pcfg: dict) -> None:
+    bcfg = pcfg["bootstrap"]
+    dist_line = "  ".join(f"{int(p*100)}%={v:.1%}" for p, v in sorted(dist.items()))
     lines = f"""# ETF 스윙 포트폴리오 시뮬레이션
 
 생성일: {pd.Timestamp.today().date()} | 규칙: config `portfolio` (점수=직전 승률,
@@ -154,11 +199,17 @@ def _write_report(st1: dict, st2: dict, e_final: float, diag: dict, pcfg: dict) 
 | 구성 | 총노출 | 누적 | CAGR | MDD | Sharpe(연) |
 |---|---|---|---|---|---|
 | Full | {pcfg['max_gross_exposure']:.2f} | {st1['cum']:+.1%} | {st1['cagr']:+.2%} | {st1['mdd']:.1%} | {st1['sharpe']:.2f} |
-| **MDD 캘리브레이션** | **{e_final:.2f}** | {st2['cum']:+.1%} | {st2['cagr']:+.2%} | **{st2['mdd']:.1%}** | {st2['sharpe']:.2f} |
+| 실현 MDD 캘리브레이션 (구방식) | {e_point:.2f} | {st2['cum']:+.1%} | {st2['cagr']:+.2%} | {st2['mdd']:.1%} | {st2['sharpe']:.2f} |
+| **부트스트랩 q{int(bcfg['quantile']*100)} 캘리브레이션 (권고)** | **{e_final:.2f}** | {st3['cum']:+.1%} | {st3['cagr']:+.2%} | {st3['mdd']:.1%} | {st3['sharpe']:.2f} |
 
-- 목표 MDD: {pcfg['target_mdd']:.0%} → 총노출 {e_final:.2f}로 축소 (2-pass, 리스크 조정)
+- 목표: 블록 부트스트랩(블록 {bcfg['block_days']}일, {bcfg['draws']}회) MDD
+  하위 {int(bcfg['quantile']*100)}퍼센타일 >= {pcfg['target_mdd']:.0%}
+  → 권고 노출에서 q{int(bcfg['quantile']*100)} MDD {q_mdd:.1%}
+- 권고 노출의 부트스트랩 MDD 분포: {dist_line}
+- 실현 MDD는 단일 경로 극값이라 분산이 크다 — 점추정 캘리브레이션(구방식
+  {e_point:.2f})은 같은 분포에서 5% 확률로 -12% 급 낙폭을 허용했다.
 - 진입 {diag['taken']}건 / 그룹 중복 스킵 {diag['skip_group']}건 / 예산 부족 스킵 {diag['skip_budget']}건
-- 주의: 캘리브레이션은 역사적 MDD 기준 — 미래 MDD가 -8%를 넘지 않는다는 보장이
-  아니라 과거 최악 구간을 -8%로 스케일한 것. 실전에서는 여유(예: 0.8배)를 둘 것.
+- 주의: 블록 부트스트랩은 장기 레짐 지속성을 끊으므로 실제 꼬리는 이보다 나쁠 수
+  있다(하한 아님). 그룹 정의는 실측 상관 |rho|>0.5 기준 — config `exposure_groups`.
 """
     (RESULTS_DIR / "portfolio.md").write_text(lines, encoding="utf-8")

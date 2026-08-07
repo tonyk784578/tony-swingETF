@@ -15,7 +15,16 @@ from .config import ROOT_DIR, load_config
 from .data_loader import confirmed_cutoff
 from .etf_swing import iter_candidates, raw_entry_signal, simulate
 
-LEDGER_COLS = ["entry_date", "exit_date", "name", "strategy", "hold", "net_ret"]
+LEDGER_COLS = ["entry_date", "exit_date", "name", "strategy", "hold", "net_ret",
+               "preview"]
+
+# preview 컬럼 — 섀도와 실거래의 구조적 괴리 진단용 (2026-08-07 추가):
+#   ok   = 진입일 아침 개장(09:00) 전 프리뷰가 신호를 표시 → 실거래 가능했던 트레이드
+#   late = 프리뷰가 개장 후에야 실행됨 (WSL 늦은 부팅) → 시가 진입 불가능했던 날
+#   miss = 프리뷰는 제때 돌았지만 신호 미표시 (데이터 지연 등) → 원인 조사 대상
+#   none = 그날 아침 프리뷰 기록 없음 / rotation2 등 대상 외
+# 판정(계열 t검정)은 전체 트레이드로 하되, ok 부분집합 성과를 병기해
+# "섀도 성과가 실거래로 옮겨지는가"를 Phase D 전에 답할 수 있게 한다.
 
 
 def _ledger_path():
@@ -24,11 +33,67 @@ def _ledger_path():
     return path
 
 
+def _preview_log_path():
+    path = ROOT_DIR / "paper" / "preview_signals.csv"
+    path.parent.mkdir(exist_ok=True)
+    return path
+
+
 def load_etf_ledger() -> pd.DataFrame:
     path = _ledger_path()
     if path.exists():
-        return pd.read_csv(path, parse_dates=["entry_date", "exit_date"])
+        led = pd.read_csv(path, parse_dates=["entry_date", "exit_date"])
+        if "preview" not in led.columns:   # 구버전 장부 호환
+            led["preview"] = "none"
+        return led
     return pd.DataFrame(columns=LEDGER_COLS)
+
+
+def record_preview_signals(states: list[dict]) -> None:
+    """아침 프리뷰가 본 진입 신호를 타임스탬프와 함께 기록 (실행가능성 증빙).
+
+    같은 날 재실행돼도 첫 기록을 보존한다 — '언제 처음 알 수 있었나'가 증빙이므로
+    나중 실행으로 덮어쓰면 안 된다.
+
+    16시(확정 컷오프) 이후 실행은 기록하지 않는다: 당일 봉이 확정된 뒤의 신호는
+    '내일 시가 진입'을 뜻하므로 date=오늘로 적으면 진입일 매칭이 어긋난다.
+    내일 신호는 내일 아침 프리뷰가 (어제까지 데이터로 동일하게) 다시 계산한다.
+    """
+    now = pd.Timestamp.now()
+    today = now.normalize()
+    if today <= confirmed_cutoff():
+        return
+    path = _preview_log_path()
+    prev = (pd.read_csv(path, parse_dates=["date"]) if path.exists()
+            else pd.DataFrame(columns=["date", "generated_at", "name", "strategy",
+                                       "enter_today"]))
+    have = set(zip(prev["name"], prev["strategy"],
+                   pd.to_datetime(prev["date"]).dt.normalize(), strict=True))
+    rows = [{"date": today, "generated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+             "name": st["cand"]["name"], "strategy": st["cand"]["strategy"],
+             "enter_today": bool(st.get("enter_today"))}
+            for st in states
+            if (st["cand"]["name"], st["cand"]["strategy"], today) not in have]
+    if rows:
+        pd.concat([prev, pd.DataFrame(rows)], ignore_index=True) \
+            .to_csv(path, index=False, encoding="utf-8-sig")
+
+
+def _preview_flag(entry_date: pd.Timestamp, name: str, strategy: str,
+                  snap: pd.DataFrame, deadline: str) -> str:
+    """완결 트레이드의 진입일 아침 프리뷰 기록 → ok/late/miss/none."""
+    if snap.empty:
+        return "none"
+    sub = snap[(snap["name"] == name) & (snap["strategy"] == strategy)
+               & (pd.to_datetime(snap["date"]).dt.normalize() == entry_date.normalize())]
+    if sub.empty:
+        return "none"
+    row = sub.iloc[0]                      # 첫 기록 = 최초 인지 시점
+    on_time = pd.Timestamp(row["generated_at"]) < pd.Timestamp(
+        f"{entry_date.date()} {deadline}")
+    if not on_time:
+        return "late"
+    return "ok" if row["enter_today"] else "miss"
 
 
 def _candidate_frames(force: bool = False):
@@ -40,6 +105,10 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
     cfg = load_config()
     cost = cfg["etf"]["cost_round_trip"]
     ledger = load_etf_ledger()
+    snap_path = _preview_log_path()
+    snap = (pd.read_csv(snap_path, parse_dates=["date"]) if snap_path.exists()
+            else pd.DataFrame())
+    deadline = cfg["etf_paper"]["preview_deadline"]
 
     new_rows = []
     status = []
@@ -65,7 +134,9 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
                 continue
             new_rows.append({"entry_date": t["entry_date"], "exit_date": t["exit_date"],
                              "name": cand["name"], "strategy": cand["strategy"],
-                             "hold": t["hold"], "net_ret": round(t["net_ret"], 6)})
+                             "hold": t["hold"], "net_ret": round(t["net_ret"], 6),
+                             "preview": _preview_flag(t["entry_date"], cand["name"],
+                                                      cand["strategy"], snap, deadline)})
         status.append({"name": cand["name"], "strategy": cand["strategy"],
                        "insample_mean": insample["mean"] if insample else float("nan"),
                        "open_pos": open_pos})
@@ -98,7 +169,8 @@ def _rotation2_rows(cfg: dict, ledger: pd.DataFrame, new_rows: list,
             continue
         new_rows.append({"entry_date": t["entry_date"], "exit_date": t["exit_date"],
                          "name": t["name"], "strategy": "rotation2",
-                         "hold": t["hold"], "net_ret": round(t["net_ret"], 6)})
+                         "hold": t["hold"], "net_ret": round(t["net_ret"], 6),
+                         "preview": "none"})   # 월초 리밸런스는 전월 말에 예고 — 대상 외
     pos_text = (", ".join(f"{p['name']}({p['unrealized']:+.1%})" for p in open_pos)
                 if open_pos else "전 슬롯 현금")
     return [{"name": "(포트폴리오)", "strategy": "rotation2",
@@ -115,10 +187,14 @@ def etf_forward_summary(ledger: pd.DataFrame, status: list[dict]) -> pd.DataFram
             sub = ledger[(ledger["name"] == st["name"])
                          & (ledger["strategy"] == st["strategy"])]
         fs = combo_stats(sub["net_ret"]) if len(sub) else combo_stats(pd.Series([], dtype=float))
+        # 실거래 가능(preview=ok) 부분집합 — 섀도→실거래 전이 가능성 진단용 병기
+        ok = sub[sub["preview"] == "ok"] if len(sub) else sub
         pos = st["open_pos"]
         rows.append({
             "name": st["name"], "strategy": st["strategy"],
             "fwd_n": fs["n"], "fwd_mean": fs["mean"], "fwd_cum": fs["cum_ret"],
+            "ok_n": len(ok),
+            "ok_mean": float(ok["net_ret"].mean()) if len(ok) else float("nan"),
             "insample_mean": st["insample_mean"],
             "position": st.get("position_text")
             or (f"보유 {pos['hold']}일째 ({pos['unrealized']:+.2%})"
@@ -192,7 +268,9 @@ def _state_text(st: dict) -> str:
 def preview_etf(force: bool = False) -> None:
     """아침용: 오늘 시가 진입 신호 여부 + 보유 포지션 상태."""
     print("\n=== ETF swing preview (Stage 2 candidates) ===")
-    for st in candidate_states(force):
+    states = candidate_states(force)
+    record_preview_signals(states)   # 실행가능성 증빙 — 최초 인지 시점 기록
+    for st in states:
         print(f"  [{st['cand']['name']}] {st['cand']['strategy']}: {_state_text(st)}")
     rot = rotation2_state(force)
     if rot:

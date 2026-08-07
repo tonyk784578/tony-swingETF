@@ -12,6 +12,8 @@ paper/logs/
 # 판정 기록이므로 추적한다 (섀도 장부 paper/*.csv 도 추적: 삭제·재생성 금지 자산)
 results/*.csv
 results/*.png
+# 판정용 동결 비용표는 예외 — 사전 등록 산출물이라 추적 필수
+!results/etf_costs.csv
 
 # 헬스체크가 경고 동안에만 만드는 상태 파일 (health 가 자동 생성·삭제)
 ALERT.md

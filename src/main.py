@@ -128,6 +128,7 @@ def cmd_paper(show_preview: bool, force: bool) -> None:
     print(etf_forward_summary(etf_ledger, status)
           .to_string(index=False, formatters={"fwd_mean": "{:+.3%}".format,
                                               "fwd_cum": "{:+.2%}".format,
+                                              "ok_mean": "{:+.3%}".format,
                                               "insample_mean": "{:+.3%}".format}))
     from .brief import STATUS_PATH, write_status
 
@@ -349,6 +350,12 @@ def cmd_health() -> None:
     run_health()
 
 
+def cmd_cost() -> None:
+    from .etf_costs import run_costs
+
+    run_costs()
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -367,7 +374,7 @@ def main() -> None:
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
-                                 "brief", "health", "all"])
+                                 "cost", "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -390,6 +397,7 @@ def main() -> None:
         "refine": lambda: cmd_refine(args.force),
         "crash": lambda: cmd_crash(args.force),
         "rotation": lambda: cmd_rotation(args.force),
+        "cost": cmd_cost,
         "brief": cmd_brief,
         "health": cmd_health,
     }
