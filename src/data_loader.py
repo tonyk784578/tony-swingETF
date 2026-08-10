@@ -66,6 +66,35 @@ def _fetch_kr(symbol: str, start: str) -> pd.DataFrame:
     return df
 
 
+def _fetch_kr_fallback(symbol: str, start: str, cache: pd.DataFrame | None
+                       ) -> pd.DataFrame:
+    """KR 예비 공급선 — FDR 장애 시 yfinance({code}.KS)의 **최신 봉만** 이어붙임.
+
+    3년 무인 관측에서 단일 소스는 최대 구조 위험이다: FDR이 몇 주 멈추면
+    경고는 떠도 아침 신호가 유실된다.
+
+    전체 대체가 아니라 append 인 이유(실측): yfinance KR 가격은 과거 구간이
+    분배금 조정 기준이라 FDR 미조정가와 최대 25%+ 어긋난다 — 통째로 바꾸면
+    과거 신호가 전부 뒤틀린다. 최신 봉(마지막 분배 이후)은 두 소스가 일치하므로
+    캐시 끝 이후만 붙인다. 캐시가 아예 없으면 yfinance 전체를 쓰되 큰 경고를
+    남긴다(기준이 다른 데이터임을 인지해야 함). 종목 지수(KS11)는 야후 티커
+    체계가 달라 미지원 — 호출부가 캐시로 degrade 한다.
+    """
+    if not symbol.isdigit():
+        raise ValueError(f"yfinance KR fallback unsupported for {symbol!r}")
+    df = _fetch_us(f"{symbol}.KS", start)   # 다운로드·정규화 로직 재사용
+    if df.empty:
+        raise RuntimeError(f"{symbol}.KS: yfinance returned empty")
+    if cache is None or cache.empty:
+        print(f"[warn] {symbol}: no cache — using FULL yfinance history "
+              "(주의: 분배금 조정 기준이 FDR과 다름)", file=sys.stderr)
+        return df
+    new = df[df.index > cache.index.max()]
+    print(f"[warn] {symbol}: yfinance fallback appended {len(new)} recent bar(s) "
+          "to FDR cache", file=sys.stderr)
+    return pd.concat([cache, new])
+
+
 def _fetch_us(symbol: str, start: str) -> pd.DataFrame:
     import yfinance as yf
 
@@ -117,8 +146,16 @@ def load_symbol(symbol: str, kind: str, force: bool = False) -> pd.DataFrame:
         return pd.read_parquet(path)
 
     try:
-        fetch = _fetch_kr if kind == "kr" else _fetch_us
-        df = fetch(symbol, cfg["start"])
+        if kind == "kr":
+            try:
+                df = _fetch_kr(symbol, cfg["start"])
+            except Exception as e:
+                print(f"[warn] {symbol} FDR failed ({e}); trying yfinance fallback",
+                      file=sys.stderr)
+                cache = pd.read_parquet(path) if path.exists() else None
+                df = _fetch_kr_fallback(symbol, cfg["start"], cache)
+        else:
+            df = _fetch_us(symbol, cfg["start"])
         if path.exists():
             try:
                 _check_revisions(symbol, pd.read_parquet(path), df)

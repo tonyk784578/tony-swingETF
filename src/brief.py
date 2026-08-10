@@ -79,6 +79,15 @@ def write_status(mode: str, force: bool = False, notify: bool = False) -> None:
         lines.append("- **로테이션 월초 리밸런스**: "
                      + ("; ".join(rot["moves"]) or "변경 없음"))
 
+    stops = [st for st in states if "trigger_inc" in st and not st["open_pos"]]
+    if stops:
+        lines.append("\n### 변동성 돌파 — 오늘 걸어둘 스탑 주문 (별도 슬리브, 섀도)")
+        lines.append("\n| ETF | 매수 조건 (스탑) | 전일 종가 | 청산 |")
+        lines.append("|---|---|---|---|")
+        for st in stops:
+            lines.append(f"| {st['cand']['name']} | 시가 + {st['trigger_inc']:,.0f}원 "
+                         f"도달 시 | {st['last_close']:,.0f} | 내일 시가 |")
+
     lines.append("\n## 포지션 (Stage 2 섀도)")
     lines.append("\n| 후보 | 전략 | 상태 |")
     lines.append("|---|---|---|")

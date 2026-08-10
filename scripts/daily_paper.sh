@@ -26,11 +26,19 @@ case "${1:-evening}" in
       "$PY" -m src.main minute
       "$PY" -m src.main paper
       "$PY" -m src.main health
-      # 장부 스냅샷 자동 커밋 (포워드 기록 보호 — paper/ 경로만, 로컬 커밋.
-      # 변경 없으면 조용히 넘어간다. 푸시는 수동)
+      # 장부 스냅샷 자동 커밋 (포워드 기록 보호 — paper/ 경로만, 로컬 커밋)
       git -C "$ROOT" add paper/ >/dev/null 2>&1 || true
       git -C "$ROOT" commit -q -m "장부 스냅샷 $(date +%F) (자동)" -- paper/ \
         >/dev/null 2>&1 || true
+      # 주간 오프사이트 백업 (금요일) — 디스크 사고 시 마지막 push 이후 기록이
+      # 사라지므로. 실패는 삼키되 로그에 남긴다 (health의 커밋 나이 감시와 별개)
+      if [ "$(date +%u)" = "5" ]; then
+        if git -C "$ROOT" push >/dev/null 2>&1; then
+          echo "weekly push: ok"
+        else
+          echo "[WARN] weekly push failed — 수동 push 필요"
+        fi
+      fi
     } >>"$LOG" 2>&1
     ;;
   *)

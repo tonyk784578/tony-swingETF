@@ -426,6 +426,10 @@ minute:
   symbol: "000660.KS"
   interval: "5m"
   cache: minute_SKHynix_5m.parquet   # data/ 아래
+  # volbreak 체결 검증용 확장 (2026-08-10 — 등록된 주의② '스탑 매수 슬리피지'를
+  # 데이터로 답하기 위해. 분봉은 60일 지나면 소급 불가라 지금부터 축적).
+  # 측정 전용 — 신호·판정과 무관. 코드는 etf_paper.candidates의 volbreak 6종.
+  volbreak_codes: ["091160", "102970", "091180", "133690", "305720", "122630"]
 
 stoploss:
   # 사전 등록 (2026-08-06 동결): 주력 조건 발동일에 장중 손절이 성과를 개선하는가.

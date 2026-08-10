@@ -376,6 +376,12 @@ def cmd_distcheck() -> None:
     run_dist_check()
 
 
+def cmd_fillcheck() -> None:
+    from .fill_check import run_fill_check
+
+    run_fill_check()
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -394,7 +400,8 @@ def main() -> None:
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
-                                 "cost", "judge", "distcheck", "brief", "health", "all"])
+                                 "cost", "judge", "distcheck", "fillcheck",
+                                 "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -420,6 +427,7 @@ def main() -> None:
         "cost": cmd_cost,
         "judge": cmd_judge,
         "distcheck": cmd_distcheck,
+        "fillcheck": cmd_fillcheck,
         "brief": cmd_brief,
         "health": cmd_health,
     }

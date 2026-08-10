@@ -73,6 +73,7 @@ python -m src.main crash           # 폭락 사례 분해 + MA200 게이트 재�
 python -m src.main cost            # ETF별 비용표 (최초 실행 시 동결 — 재실행은 조회만)
 python -m src.main judge           # 판정 절차 실행 (표본 미달 시 도달률만 — 언제든 안전)
 python -m src.main distcheck       # 분배금 편향 진단 (KOSEF — 신호 불변, 측정만)
+python -m src.main fillcheck       # volbreak 체결 검증 (분봉 실측 — 측정만)
 python -m src.main rotation        # 로테이션 실험1(기각) 재현 + 실험2(확장, 통과) 재현
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
@@ -285,9 +286,27 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   9~23% — 하위 후보는 미통과 시 개별 제거. `judge`/`health`가
   `mode: per_candidate`로 처리.
 - **운영**: 포트폴리오 시뮬 미편입(1일 회전 별도 슬리브 — rotation2 선례),
-  주문 계획 표시 제외, 프리뷰가 매일 "스탑매수 대기: 시가+X원" 표시.
-  preview 플래그는 armed 기록 방식이라 ok가 곧 '개장 전 주문 가능했음'.
-  비용표에 신규 3종 append (Securities 실측 0.108% > 0.1% — max 규칙 작동).
+  주문 계획 표시 제외, 프리뷰가 매일 "스탑매수 대기: 시가+X원" 표시 +
+  STATUS.md에 스탑 주문표 섹션. preview 플래그는 armed 기록 방식이라 ok가 곧
+  '개장 전 주문 가능했음'. 비용표에 신규 3종 append (Securities 실측
+  0.108% > 0.1% — max 규칙 작동).
+- **체결 검증 인프라 (2026-08-10)**: `minute` 단계가 volbreak 6종 5분봉도
+  수집(data/minute_{code}_5m.parquet — 60일 한도 대비 자체 축적, 종목별 독립
+  실패 처리). `fillcheck`가 트리거 도달일마다 모형 체결가(max(시가,트리거)) vs
+  보수 체결가(최초 도달 5분봉 종가)로 수익을 재계산 — **첫 측정(60일):
+  슬리피지 상한 0.05~0.23%/건**으로 인샘플 엣지(0.10~0.36%)와 같은 자릿수.
+  등록된 주의②가 실측으로 확인됨 — 판정 통과해도 실전 투입 전 이 표본으로
+  재검토 필수 (results/volbreak_fill_check.md, 측정 전용·신호 불변).
+
+## 데이터 공급선 이중화 (2026-08-10)
+
+- KR 일봉: FDR 실패 시 yfinance({code}.KS) 폴백 — 단, **최신 봉 append 전용**.
+  전체 대체 금지 실측 근거: yfinance KR 과거 가격은 분배금 조정 기준이라
+  FDR 미조정가와 최대 25%+ 어긋남(정정 감시가 실제로 검출). 최신 봉은 두 소스
+  일치 확인. 캐시가 아예 없으면 yfinance 전체 + 큰 경고. 지수(KS11)는 미지원 —
+  캐시 degrade. 폴백 사용은 stderr [warn]으로 로그에 남는다.
+- 주간 오프사이트 백업: evening 스크립트가 **금요일마다 git push** (실패 시
+  로그에 [WARN] — 수동 push 병행 가능).
 
 ## 폭락 대비 검토 (2026-08-07, `crash` 단계 — 판정 완료, 게이트 재실험 금지)
 
