@@ -8,7 +8,8 @@ main_stock: SKHynix        # 서브 트랙 주력 종목 (분석·사이징·손
 ops:
   # 운영 편의 계층 (신호·판정과 무관 — 조정해도 통계 오염 없음)
   virtual_capital: 10000000  # STATUS.md 주문 계획 환산용 가상 자본 (원)
-  exposure: 0.58             # 총노출 — portfolio 캘리브레이션 결과의 수동 반영
+  exposure: 0.41             # 총노출 — portfolio 부트스트랩 q5 캘리브레이션 권고
+                             # (2026-08-10 반영: 구 점추정 0.58 → 분위수 기준 0.41)
   notify_signals: true       # 아침 신호 발동 시 데스크톱 알림
 
 data:
