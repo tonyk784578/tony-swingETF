@@ -134,6 +134,10 @@ def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) 
         fast = close.rolling(p["trend_fast"]).mean()
         slow = close.rolling(p["trend_slow"]).mean()
         return (close > close.rolling(p["lookback"]).max().shift(1)) & (fast > slow)
+    if strategy.startswith("ewy_"):
+        # 교차상장 신호: 매핑된 전일(미국) EWY 수익률이 임계 이상 — us_dip처럼
+        # 매핑 자체가 '미국 날짜 < D'라 그대로 D 진입 플래그 (룩어헤드 없음)
+        return us_ret_mapped.reindex(df.index) >= p["threshold"]
     if strategy == "tom":
         # 월초 첫 거래일 = 직전 거래일과 (연,월)이 다름. us_dip처럼 그 자체가
         # 'D 시가 진입' 플래그다 (달력 정보는 D 개장 전에 확정 — shift 불필요)
@@ -164,7 +168,7 @@ def build_flags(df: pd.DataFrame, strategy: str,
         # 상승장 추세 라이더: 전략별 max_hold(60)가 기본 10일 캡을 대체 —
         # 추세 이탈(종가<MA20) 전까지 보유를 연장하는 것이 가설의 핵심
         return raw.shift(1), close < close.rolling(p["exit_ma"]).mean(), p["max_hold"]
-    # us_dip / tom: raw 가 곧 진입 플래그, 고정 보유일 청산
+    # us_dip / tom / ewy_*: raw 가 곧 진입 플래그, 고정 보유일 청산
     return raw, pd.Series(False, index=df.index), p["hold_days"]
 
 
@@ -217,17 +221,22 @@ def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataF
     cut = confirmed_cutoff()
 
     nasdaq = load_symbol("^IXIC", "us", force)
+    needs_ewy = any(s.startswith("ewy_") for s in strategies)
+    ewy = load_symbol("EWY", "us", force) if needs_ewy else None
     rows = []
     for code, name in universe.items():
         df = load_symbol(str(code), "kr", force)
         df = df[df.index <= cut]  # 장중 실행 시 당일 미완성 봉 제외
         us_mapped = map_us_to_kr(us_returns(nasdaq), df.index, "ixic")["ixic"]
+        ewy_mapped = (map_us_to_kr(us_returns(ewy), df.index, "ewy")["ewy"]
+                      if needs_ewy else None)
         bh = df["Close"].iloc[-1] / df["Close"].iloc[0] - 1
         for strat in strategies:
             if strat == "volbreak":   # 장중 체결 모형 — 전용 엔진 (플래그 방식 밖)
                 trades = simulate_volbreak(df, ecfg["strategies"]["volbreak"]["k"], cost)
             else:
-                entry, exit_, max_hold = build_flags(df, strat, us_mapped)
+                us_series = ewy_mapped if strat.startswith("ewy_") else us_mapped
+                entry, exit_, max_hold = build_flags(df, strat, us_series)
                 trades = simulate(df, entry, exit_, max_hold, cost)
             if trades.empty:
                 continue
@@ -252,7 +261,16 @@ def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataF
 
 def run_screening(force: bool = False) -> pd.DataFrame:
     ecfg = load_config()["etf"]
-    out = _screen_rows(ecfg["universe"], list(ecfg["strategies"]), force)
+    strats = ecfg["strategies"]
+    # 자체 universe 를 선언한 전략(예: ewy_* — 한국 주식 대표만)은 본 12종
+    # 스크리닝에서 빼고 제한 유니버스로만 시험 — 시험 수 통제 (사전 등록 범위)
+    base = [s for s in strats if "universe" not in strats[s]]
+    out = _screen_rows(ecfg["universe"], base, force)
+    for s, p in strats.items():
+        if "universe" in p:
+            uni = {c: ecfg["universe"][c] for c in p["universe"]}
+            out = pd.concat([out, _screen_rows(uni, [s], force)], ignore_index=True)
+    out = out.sort_values("t_stat", ascending=False).reset_index(drop=True)
     out.to_csv(RESULTS_DIR / "etf_screening.csv", index=False, encoding="utf-8-sig")
     _write_report(out)
     return out
@@ -299,6 +317,8 @@ _STRATEGY_STATUS = {
     "us_dip":     "종결 — 기각",
     "tom":        "1/12 통과 (KODEX_Gold) — Stage 2 섀도. 주의: 주식 가설인데 금만 통과",
     "volbreak":   "6/12 통과 — Stage 2 섀도 (후보별 Bonferroni 판정, 후반 감쇠 주의)",
+    "ewy_up1":    "종결 — 기각 (0/2). 야간 정보는 시가에 이미 반영",
+    "ewy_up2":    "종결 — 기각 (0/2). us_dip과 함께 '미국 신호→ETF 시가' 계열 완전 종결",
 }
 
 
