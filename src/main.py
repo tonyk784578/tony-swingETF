@@ -97,6 +97,9 @@ def cmd_paper(show_preview: bool, force: bool) -> None:
     if show_preview:
         preview(data)
         preview_etf(force)
+        from .snapshot import record_market_snapshot
+
+        record_market_snapshot()   # 개장 전 세계 상태 축적 (소급 불가 데이터)
         from .brief import STATUS_PATH, write_status
 
         write_status("morning", notify=True)

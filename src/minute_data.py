@@ -60,7 +60,7 @@ def load_volbreak_minute(code: str) -> pd.DataFrame:
 def collect_minute() -> pd.DataFrame:
     """최근 구간 분봉을 받아 기존 캐시에 병합. 실패 시 기존 캐시 유지.
 
-    주력종목(손절 검증용) + volbreak ETF 6종(체결 검증용)을 함께 수집한다.
+    주력종목(손절 검증용) + Stage 2 후보 ETF(체결·연구 재료)를 함께 수집한다.
     종목별로 독립 시도 — 하나가 실패해도 나머지는 진행 (침묵 유실 방지).
     """
     mcfg = load_config()["minute"]
@@ -72,7 +72,7 @@ def collect_minute() -> pd.DataFrame:
         print(f"[warn] minute download failed ({e}); keeping cache", file=sys.stderr)
         result = old
 
-    for code in mcfg.get("volbreak_codes", []):
+    for code in mcfg.get("etf_codes", []):
         try:
             df = _fetch_minute(f"{code}.KS", mcfg["interval"])
             _merge_into(volbreak_minute_path(code), df, load_volbreak_minute(code))
