@@ -83,6 +83,26 @@ def test_not_yet_below_sample(monkeypatch, capsys):
     assert "판정 시점 아님 — 완결 119/120건" in out
 
 
+def test_volbreak_per_candidate_mode_judges_individually(monkeypatch, capsys):
+    # 강한 후보는 통과, 음수 후보는 기각 — 같은 계열 안에서 개별 판정.
+    # 표본 운에 좌우되지 않도록 명확히 갈리는 합성 수치 사용 (메커니즘 검증 목적)
+    led = pd.concat([
+        _ledger(300, 0.010, 0.0185, name="KODEX_Semicon", strategy="volbreak", seed=1),
+        _ledger(300, -0.005, 0.0226, name="KODEX_Lev", strategy="volbreak", seed=2),
+    ])
+    out = _run(monkeypatch, capsys, led)
+    sem = [ln for ln in out.splitlines() if "KODEX_Semicon volbreak" in ln][0]
+    lev = [ln for ln in out.splitlines() if "KODEX_Lev volbreak" in ln][0]
+    assert "통과" in sem            # ncp≈9.4 — 임계 2.408을 확실히 상회
+    assert "기각" in lev            # 평균 음수 — 통과 불가
+
+
+def test_volbreak_waits_below_sample(monkeypatch, capsys):
+    led = _ledger(299, 0.004, 0.018, name="KODEX_Semicon", strategy="volbreak")
+    out = _run(monkeypatch, capsys, led)
+    assert "표본 대기 299/300" in out
+
+
 def test_rotation2_verdict_runs_at_threshold(monkeypatch, capsys):
     led = pd.concat([_ledger(120, 0.013, 0.055),
                      _ledger(20, 0.057, 0.202, name="KODEX_Semicon",

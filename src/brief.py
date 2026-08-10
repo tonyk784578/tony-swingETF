@@ -28,6 +28,10 @@ def order_plan(states: list[dict], capital: float, exposure: float,
     for st in states:
         if not st["enter_today"] or st["open_pos"]:
             continue
+        if "trigger_inc" in st:
+            # volbreak — 포트폴리오 규칙 기반 환산 대상 아님 (별도 슬리브).
+            # 스탑 주문 정보는 포지션 섹션의 상태 텍스트가 담당
+            continue
         lev = leverage.get(str(st["cand"]["code"]), 1)
         amount = capital * exposure / 3 / lev
         qty = int(amount // st["last_close"]) if st["last_close"] > 0 else 0

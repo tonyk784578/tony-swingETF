@@ -13,7 +13,13 @@ import pandas as pd
 from .backtest import combo_stats
 from .config import ROOT_DIR, load_config
 from .data_loader import confirmed_cutoff
-from .etf_swing import iter_candidates, raw_entry_signal, simulate
+from .etf_swing import (
+    iter_candidates,
+    raw_entry_signal,
+    simulate,
+    simulate_volbreak,
+    volbreak_trigger,
+)
 
 LEDGER_COLS = ["entry_date", "exit_date", "name", "strategy", "hold", "net_ret",
                "preview"]
@@ -116,8 +122,12 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
         # 후보별 freeze — 나중에 등록된 후보(예: trend_ride 2026-08-07)는 자기
         # 등록일 이후만 아웃오브샘플. 기존 후보의 freeze는 건드리지 않는다.
         freeze = pd.Timestamp(cand.get("freeze", cfg["etf_paper"]["freeze_date"]))
-        trades, open_pos = simulate(df, entry, exit_, max_hold, cost,
-                                    return_open=True, trailing=trailing)
+        if cand["strategy"] == "volbreak":
+            trades, open_pos = simulate_volbreak(
+                df, cfg["etf"]["strategies"]["volbreak"]["k"], cost, return_open=True)
+        else:
+            trades, open_pos = simulate(df, entry, exit_, max_hold, cost,
+                                        return_open=True, trailing=trailing)
         insample = None
         if len(trades):
             r = trades.set_index("entry_date")["net_ret"]
@@ -222,17 +232,27 @@ def candidate_states(force: bool = False) -> list[dict]:
             # 일반 분기(raw 마지막 값)는 '마지막 봉이 월초였나'라 하루 어긋난다
             today, last = pd.Timestamp.today(), df.index[-1]
             enter_today = bool((today.year, today.month) != (last.year, last.month))
+        elif cand["strategy"] == "volbreak":
+            # 매일 조건부 대기 — 트리거(시가+증분)는 개장 전 확정, 스탑 주문 가능
+            enter_today = True
         else:
             # 마지막 확정 봉의 raw 신호 = '다음 개장(오늘) 진입' — 백테스트와 동일 함수
             raw = raw_entry_signal(df, cand["strategy"], pd.Series(dtype=float))
             enter_today = bool(raw.iloc[-1])
 
-        _, open_pos = simulate(df, entry, exit_, max_hold,
-                               cfg["etf"]["cost_round_trip"],
-                               return_open=True, trailing=trailing)
-        out.append({"cand": cand, "enter_today": enter_today, "open_pos": open_pos,
-                    "last_close": float(df["Close"].iloc[-1]),
-                    "last_date": df.index[-1]})
+        state = {"cand": cand, "enter_today": enter_today,
+                 "last_close": float(df["Close"].iloc[-1]), "last_date": df.index[-1]}
+        if cand["strategy"] == "volbreak":
+            k = cfg["etf"]["strategies"]["volbreak"]["k"]
+            _, open_pos = simulate_volbreak(df, k, cfg["etf"]["cost_round_trip"],
+                                            return_open=True)
+            state["trigger_inc"] = volbreak_trigger(df, k)
+        else:
+            _, open_pos = simulate(df, entry, exit_, max_hold,
+                                   cfg["etf"]["cost_round_trip"],
+                                   return_open=True, trailing=trailing)
+        state["open_pos"] = open_pos
+        out.append(state)
     return out
 
 
@@ -269,6 +289,9 @@ def _state_text(st: dict) -> str:
     if pos:
         return (f"보유 {pos['hold']}일째, 진입 {pos['entry_date'].date()} "
                 f"@{pos['entry_price']:,.0f}, 평가 {pos['unrealized']:+.2%}")
+    if "trigger_inc" in st:   # volbreak — 조건부 스탑 매수 (도달 시에만 체결)
+        return (f"스탑매수 대기: 시가 + {st['trigger_inc']:,.0f}원 도달 시 체결 "
+                "(내일 시가 청산)")
     return "오늘 시가 진입 대기" if st["enter_today"] else "무포지션 · 신호 없음"
 
 

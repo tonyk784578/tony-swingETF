@@ -68,6 +68,28 @@ def run_judge() -> None:
         members = [k for k, f in fam_of.items() if f == fam]
         fam_led = (led[pd.MultiIndex.from_frame(led[["name", "strategy"]])
                        .isin(set(members))] if len(led) else led)
+
+        if rule.get("mode") == "per_candidate":
+            # 풀링 검정 없음 (동시 트리거 상관으로 풀 t가 부풀기 때문 — config 주석).
+            # 후보별 단측 t (다중성 보정 임계) — 각 후보 1회, 도달 순서대로.
+            need, crit = rule["n"], rule["t"]
+            print(f"=== [{fam}] 후보별 판정 (다중성 보정 단측 t>={crit} — 절차 동결본) ===")
+            for name, strat in members:
+                sub = (fam_led[(fam_led["name"] == name)
+                               & (fam_led["strategy"] == strat)]
+                       if len(fam_led) else fam_led)
+                label = f"{name} {strat}"
+                if len(sub) < need:
+                    print(f"  {label:34s} 표본 대기 {len(sub)}/{need}")
+                    continue
+                r = adjust_costs(first_n_by_completion(sub, need), cost_flat, cost_map)
+                t = one_sided_t(r)
+                ok = bool(r.mean() > 0 and t >= crit)
+                print(f"  {label:34s} 처음 {need}건 평균 {r.mean():+.3%} t={t:.2f} "
+                      f"→ {'통과 — 실거래 편입 가능' if ok else '기각 — 해당 후보 제거'}")
+            print()
+            continue
+
         pooled_n, fam_t = rule["pooled_n"], rule["t"]
         print(f"=== [{fam}] 계열 판정 (후보 {len(members)}개 풀링 — 절차 동결본) ===")
         if len(fam_led) < pooled_n:

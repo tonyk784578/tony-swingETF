@@ -189,8 +189,19 @@ def readiness_rows() -> list[dict]:
     #     각 계열: pooled_n 도달 시 풀링 평균>0 AND 단측 t, 1회 검정.
     fam_of = {(c["name"], c["strategy"]): c.get("family", "trend")
               for c in cfg["etf_paper"]["candidates"]}
+    per_cand_fams = set()
     for fam, rule in jcfg.get("families", {}).items():
         members = {k for k, f in fam_of.items() if f == fam}
+        if rule.get("mode") == "per_candidate":
+            # 풀링 검정이 없는 계열 — 후보별 도달률만 (아래 후보별 행에서 need 대체)
+            per_cand_fams.add(fam)
+            for name, strat in sorted(members):
+                n = 0 if etf_led.empty else int(((etf_led["name"] == name)
+                                                 & (etf_led["strategy"] == strat)).sum())
+                rows.append({"label": f"ETF [{fam}] 후보별 판정 {name}",
+                             "n": n, "need": rule["n"], "indent": 2,
+                             "ready_msg": "판정 가능! `python -m src.main judge` 실행"})
+            continue
         n_fam = 0 if etf_led.empty else int(
             pd.MultiIndex.from_frame(etf_led[["name", "strategy"]]).isin(members).sum())
         rows.append({"label": f"ETF [{fam}] 계열 판정({len(members)}후보 풀링, 단측 t)",
@@ -206,6 +217,8 @@ def readiness_rows() -> list[dict]:
                  "indent": 1,
                  "ready_msg": "중간점검 가능 (계열 생존 확인용 — 실거래 채택 근거 아님)"})
     for cand in cfg["etf_paper"]["candidates"]:
+        if cand.get("family", "trend") in per_cand_fams:
+            continue   # 위에서 자체 판정 행으로 이미 표시 (부호 규칙 미적용 계열)
         n = 0 if etf_led.empty else int(((etf_led["name"] == cand["name"])
                                          & (etf_led["strategy"] == cand["strategy"])).sum())
         rows.append({"label": f"후보별(채택/제거 부호 규칙) {cand['name']} {cand['strategy']}",

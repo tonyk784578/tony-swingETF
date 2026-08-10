@@ -63,6 +63,8 @@ def run_case_study(force: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     seen_codes = set()
     for cand, df, entry, exit_, max_hold, trailing in iter_candidates(
             force, cutoff=confirmed_cutoff()):
+        if cand["strategy"] == "volbreak":
+            continue   # 폭락 분해는 스윙 계열 대상 (2026-08-07 판정 완료 동결 재현)
         eps = find_episodes(df["Close"], p["lookback"], p["drawdown"], p["merge_gap"])
         if cand["code"] not in seen_codes:
             seen_codes.add(cand["code"])

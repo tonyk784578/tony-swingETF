@@ -185,6 +185,24 @@ etf:
       # 게이트: Stage 1 동일 (N>=30, 전/후반 양수, t>=2). 그리드서치 금지.
       hold_days: 2          # 월초 1일 시가 진입 → 3일 종가 청산 (T+1~T+3).
                             # 엔진 held 카운트가 진입일=0이라 '2'가 3거래일 창이다
+    volbreak:               # 장중 모멘텀: 변동성 돌파 — 2026-08-10 사전 등록
+      # 가설/근거: 장중에 '시가 + 전일 변동폭의 k배'를 넘는 강한 상승은 단기
+      #   모멘텀 점화로, 다음날 시가까지 이어진다 — Larry Williams(Long-Term
+      #   Secrets to Short-Term Trading)의 변동성 돌파. 국내 퀀트 서적이
+      #   표준 전략으로 정착시킴 (강환국 「퀀트 투자 무작정 따라하기」·
+      #   「할 수 있다! 퀀트 투자」 — k=0.5 관례). 기존 계열과의 차이:
+      #   전일 종가 신호(일봉 시간대)가 아니라 당일 장중 돌파(일중 시간대) +
+      #   익일 시가 청산(오버나이트 보유) — 정보 집합·보유 기간이 다른 새 가설.
+      # 체결 모형(등록 시 확정): 매수가 = max(시가, 트리거) — 시가가 이미
+      #   트리거 위면 시가 체결(현실적), 아니면 트리거 도달 시 그 가격.
+      #   실전 체결은 스탑 매수 특성상 이보다 불리할 수 있음(슬리피지 방향이
+      #   전략에 불리)을 등록 시점에 명시 — 판정 시 비용표와 함께 해석.
+      #   당일 트리거 후 다음 봉이 없으면(미완성) 트레이드 미계상.
+      # 실행 가능성: 트리거 가격은 전일 변동폭으로 개장 전 확정 —
+      #   아침에 조건부(스탑) 매수 주문을 걸 수 있어 라이브 구현이 순수하다.
+      # 시험 범위: 기본 유니버스 12종 x 1 = 12테스트 (누적 128 → 140).
+      #   게이트 동일 (N>=30, 전/후반 양수, t>=2). k 그리드서치 금지.
+      k: 0.5                # 전일 (고가-저가) 배수 — Larry Williams/국내 관례 표준
 
 etf_rotation:
   # 듀얼 모멘텀 로테이션 (2026-08-07 사전 등록 — 1회 실행 판정, 그리드서치 금지)
@@ -272,6 +290,16 @@ etf_paper:
       trend:                 # 추세추종 계열 (breakout/macross/trend_ride 7후보)
         pooled_n: 120        # [1] 계열 판정 표본 (약 2.3년) — v2 등록값 불변
         t: 1.66              # [1] 단측 t 임계 (alpha=0.05) — v2 등록값 불변
+      volbreak:              # 장중 계열 (2026-08-10 등록 — 6후보, 후보별 판정)
+        mode: per_candidate  # 계열 풀링 검정을 두지 않는다 — 등록 시 계산 근거:
+        # 6후보가 같은 날 동시 트리거되는 고상관 구조라 트레이드 풀 t가 3.7배
+        # 부푼다(나이브 8.75 vs 일단위 교정 2.38). 일 단위로 교정하면 어떤
+        # 표본으로도 검정력이 부족(22개월 24%). 후보별로는 빈도가 높아
+        # (연 69~106건) 개별 검정이 성립 — 인샘플 재현 가정 검정력:
+        # Semicon 83% / Securities 52% / Auto 23% / Battery 19% / NDX 15% /
+        # Lev 9%. 하위 후보는 미통과 시 해당 후보만 제거되는 구조.
+        n: 300               # 후보별 완결 300건 (약 3년, Battery만 ~4.3년)
+        t: 2.408             # 단측 alpha=0.05/6 (Bonferroni — 6후보 다중성 보정)
       tom:                   # 캘린더 계열 (2026-08-07 등록 — KODEX_Gold 단일 후보)
         pooled_n: 30         # 12.0건/년 → 약 2.5년. 단일 후보라 계열 판정=후보 판정
         t: 1.699             # 단측 alpha=0.05 (df=29)
@@ -298,6 +326,16 @@ etf_paper:
     - {code: "148070", name: KOSEF_KTB10Y, strategy: trend_ride, freeze: "2026-08-07"}
     # tom 계열 (캘린더 — family 필드가 판정 풀을 가른다. 기본값은 trend)
     - {code: "132030", name: KODEX_Gold, strategy: tom, family: tom, freeze: "2026-08-07"}
+    # volbreak 계열 (장중 변동성 돌파 — 2026-08-10 스크리닝 6/12 통과분 전원 편입.
+    # 포트폴리오 시뮬 미편입: 1일 회전 별도 슬리브 — rotation2 선례.
+    # 주의 2건 등록: (1) 후반부(2021~) 평균이 전반 대비 크게 감소 — 알파 소멸
+    # 가능성, (2) 스탑 매수 체결은 모형보다 불리할 수 있음 — 판정 시 함께 해석)
+    - {code: "091160", name: KODEX_Semicon, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
+    - {code: "102970", name: KODEX_Securities, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
+    - {code: "091180", name: KODEX_Auto, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
+    - {code: "133690", name: TIGER_NASDAQ100, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
+    - {code: "305720", name: KODEX_Battery, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
+    - {code: "122630", name: KODEX_Lev, strategy: volbreak, family: volbreak, freeze: "2026-08-10"}
 
 portfolio:
   # 포트폴리오 시뮬레이션 규칙 (2026-08-06 등록)

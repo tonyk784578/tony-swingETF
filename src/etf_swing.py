@@ -71,6 +71,42 @@ def simulate(df: pd.DataFrame, entry_flag: pd.Series, exit_flag: pd.Series,
     return result, open_pos
 
 
+def simulate_volbreak(df: pd.DataFrame, k: float, cost: float,
+                      return_open: bool = False):
+    """변동성 돌파 전용 엔진 — 장중 스탑 매수 + 익일 시가 청산.
+
+    일반 simulate()는 '신호 다음날 시가 진입'이라 장중 트리거 체결을 표현할 수
+    없어 전용 엔진을 둔다 (사전 등록된 체결 모형 — config etf.strategies.volbreak).
+    - 트리거(D) = 시가(D) + k x (고가(D-1) - 저가(D-1))  ← 개장 전 확정 가능
+    - 고가(D) >= 트리거면 max(시가, 트리거)에 체결 (갭 상승 개장이면 시가)
+    - 청산 = 다음날 시가. 마지막 봉의 트리거는 다음 봉이 없으므로 미완성 처리.
+    """
+    trig = df["Open"] + k * (df["High"].shift(1) - df["Low"].shift(1))
+    hit = (df["High"] >= trig).fillna(False)
+    trades = []
+    for i in range(len(df) - 1):
+        if hit.iloc[i]:
+            fill = max(df["Open"].iloc[i], trig.iloc[i])
+            trades.append({
+                "entry_date": df.index[i], "exit_date": df.index[i + 1], "hold": 1,
+                "net_ret": df["Open"].iloc[i + 1] / fill - 1 - cost,
+            })
+    result = pd.DataFrame(trades)
+    if not return_open:
+        return result
+    open_pos = None
+    if hit.iloc[-1]:
+        fill = max(df["Open"].iloc[-1], trig.iloc[-1])
+        open_pos = {"entry_date": df.index[-1], "entry_price": fill, "hold": 0,
+                    "unrealized": df["Close"].iloc[-1] / fill - 1}
+    return result, open_pos
+
+
+def volbreak_trigger(df: pd.DataFrame, k: float) -> float:
+    """다음 거래일의 트리거 증분 — '시가 + 이 값' 이상이면 매수 (프리뷰 표시용)."""
+    return float(k * (df["High"].iloc[-1] - df["Low"].iloc[-1]))
+
+
 def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) -> pd.Series:
     """전략의 원신호 — 마지막 값이 True면 '다음 개장 시가 진입'.
 
@@ -157,6 +193,10 @@ def iter_candidates(force: bool = False, cutoff: pd.Timestamp | None = None,
         df = load_symbol(str(cand["code"]), "kr", force)
         if cutoff is not None:
             df = df[df.index <= cutoff]
+        if cand["strategy"] == "volbreak":
+            # 장중 체결 모형 — 플래그 방식 밖. 소비자는 simulate_volbreak로 분기
+            yield cand, df, None, None, None, None
+            continue
         us_mapped = map_us_to_kr(us_returns(nasdaq), df.index, "ixic")["ixic"]
         if adopted_exits:
             entry, exit_, max_hold, trailing = candidate_flags(cand, df, us_mapped)
@@ -184,8 +224,11 @@ def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataF
         us_mapped = map_us_to_kr(us_returns(nasdaq), df.index, "ixic")["ixic"]
         bh = df["Close"].iloc[-1] / df["Close"].iloc[0] - 1
         for strat in strategies:
-            entry, exit_, max_hold = build_flags(df, strat, us_mapped)
-            trades = simulate(df, entry, exit_, max_hold, cost)
+            if strat == "volbreak":   # 장중 체결 모형 — 전용 엔진 (플래그 방식 밖)
+                trades = simulate_volbreak(df, ecfg["strategies"]["volbreak"]["k"], cost)
+            else:
+                entry, exit_, max_hold = build_flags(df, strat, us_mapped)
+                trades = simulate(df, entry, exit_, max_hold, cost)
             if trades.empty:
                 continue
             r = trades.set_index("entry_date")["net_ret"]
@@ -255,6 +298,7 @@ _STRATEGY_STATUS = {
     "pullback":   "종결 — 필터형 평균회귀도 기각 (0/12)",
     "us_dip":     "종결 — 기각",
     "tom":        "1/12 통과 (KODEX_Gold) — Stage 2 섀도. 주의: 주식 가설인데 금만 통과",
+    "volbreak":   "6/12 통과 — Stage 2 섀도 (후보별 Bonferroni 판정, 후반 감쇠 주의)",
 }
 
 

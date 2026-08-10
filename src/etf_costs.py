@@ -30,7 +30,7 @@ import pandas as pd
 
 from .config import RESULTS_DIR, load_config
 from .data_loader import confirmed_cutoff
-from .etf_swing import iter_candidates, simulate
+from .etf_swing import iter_candidates, simulate, simulate_volbreak
 
 
 def corwin_schultz(df: pd.DataFrame, window_days: int) -> float:
@@ -140,12 +140,16 @@ def run_costs() -> None:
               "", "| 후보 | 평균(일괄) | t(일괄) | 평균(판정) | t(판정) |", "|---|---|---|---|---|"]
 
     print(f"\n{'후보':30s} {'일괄 0.1%':>16s} {'판정비용':>16s}")
+    k_vb = cfg["etf"]["strategies"]["volbreak"]["k"]
     for cand, df, entry, exit_, mh, tr in iter_candidates(False, cutoff=confirmed_cutoff()):
         key = f"{cand['name']} {cand['strategy']}"
         c_est = cost_map[str(cand["code"])]
         cells = []
         for c in (cost_flat, c_est):
-            t = simulate(df, entry, exit_, mh, c, trailing=tr)
+            if cand["strategy"] == "volbreak":
+                t = simulate_volbreak(df, k_vb, c)
+            else:
+                t = simulate(df, entry, exit_, mh, c, trailing=tr)
             r = t["net_ret"]
             tstat = r.mean() / r.std(ddof=1) * np.sqrt(len(r))
             cells.append((r.mean(), tstat))
