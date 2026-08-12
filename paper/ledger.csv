@@ -8,3 +8,6 @@
 2026-08-11,SKHynix,nvda_down2 & gap_down,True,1405000,1425000,-0.010563,0.012235,0.5
 2026-08-11,SKHynix,nvda_down2 & kospi_down,False,1405000,1425000,-0.010563,,0.5
 2026-08-11,SKHynix,sox_down1 & nvda_down2,True,1405000,1425000,-0.010563,0.012235,0.5
+2026-08-12,SKHynix,nvda_down2 & gap_down,False,1456000,1504000,0.021754,,0.5
+2026-08-12,SKHynix,nvda_down2 & kospi_down,False,1456000,1504000,0.021754,,0.5
+2026-08-12,SKHynix,sox_down1 & nvda_down2,False,1456000,1504000,0.021754,,0.5
