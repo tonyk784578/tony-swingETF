@@ -1,3 +1,9 @@
 ﻿entry_date,exit_date,name,strategy,hold,net_ret,preview
-2026-08-11 00:00:00,2026-08-12 00:00:00,KODEX_Lev,volbreak,1,0.02575,ok
-2026-08-11 00:00:00,2026-08-12 00:00:00,KODEX_Semicon,volbreak,1,0.029454,ok
+2026-08-11,2026-08-12,KODEX_Lev,volbreak,1,0.02575,ok
+2026-08-11,2026-08-12,KODEX_Semicon,volbreak,1,0.029454,ok
+2026-08-12,2026-08-13,KODEX_Auto,volbreak,1,0.020216,ok
+2026-08-12,2026-08-13,KODEX_Battery,volbreak,1,-0.011345,ok
+2026-08-12,2026-08-13,KODEX_Lev,volbreak,1,0.091207,ok
+2026-08-12,2026-08-13,KODEX_Securities,volbreak,1,0.021199,ok
+2026-08-12,2026-08-13,KODEX_Semicon,volbreak,1,0.038513,ok
+2026-08-12,2026-08-13,TIGER_NASDAQ100,volbreak,1,0.004225,ok
