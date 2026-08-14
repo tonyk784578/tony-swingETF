@@ -210,20 +210,22 @@ def iter_candidates(force: bool = False, cutoff: pd.Timestamp | None = None,
         yield cand, df, entry, exit_, max_hold, trailing
 
 
-def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataFrame:
-    """유니버스 x 전략 스크리닝 공용 루프 — 본 스크리닝과 확장 스크리닝이 공유."""
+def iter_screen_trades(universe: dict, strategies: list[str], force: bool):
+    """스크리닝 (ETF x 전략) 트레이드 산출 공용 반복자.
+
+    yield: dict(etf, code, strategy, df, bh, trades). 스크리닝 통계(_screen_rows)와
+    다중검정 보정(multiple_testing)이 **같은** 트레이드 경로를 공유하도록 분리한 것 —
+    보정 쪽에서 별도 구현을 두면 두 결과가 소리 없이 갈라진다.
+    """
     from .data_loader import confirmed_cutoff
 
-    cfg = load_config()
-    ecfg = cfg["etf"]
+    ecfg = load_config()["etf"]
     cost = ecfg["cost_round_trip"]
-    boundary = pd.Timestamp(cfg["split"]["boundary"])
     cut = confirmed_cutoff()
 
     nasdaq = load_symbol("^IXIC", "us", force)
     needs_ewy = any(s.startswith("ewy_") for s in strategies)
     ewy = load_symbol("EWY", "us", force) if needs_ewy else None
-    rows = []
     for code, name in universe.items():
         df = load_symbol(str(code), "kr", force)
         df = df[df.index <= cut]  # 장중 실행 시 당일 미완성 봉 제외
@@ -238,23 +240,36 @@ def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataF
                 us_series = ewy_mapped if strat.startswith("ewy_") else us_mapped
                 entry, exit_, max_hold = build_flags(df, strat, us_series)
                 trades = simulate(df, entry, exit_, max_hold, cost)
-            if trades.empty:
-                continue
-            r = trades.set_index("entry_date")["net_ret"]
-            st = combo_stats(r)
-            st_first = combo_stats(r[r.index < boundary])
-            st_second = combo_stats(r[r.index >= boundary])
-            rows.append({
-                "etf": name, "code": code, "strategy": strat,
-                "start": df.index.min().date(), "bh_cum": bh,
-                "n": st["n"], "avg_hold": trades["hold"].mean(),
-                "mean": st["mean"], "win": st["win_rate"], "cum": st["cum_ret"],
-                "mdd": st["mdd"], "t_stat": st["t_stat"],
-                "first_mean": st_first["mean"], "second_mean": st_second["mean"],
-                "sign_holds": bool(st_first["n"] >= 10 and st_second["n"] >= 10
-                                   and st_first["mean"] > 0 and st_second["mean"] > 0),
-                "rankable": st["n"] >= ecfg["min_trades"],
-            })
+            yield {"etf": name, "code": code, "strategy": strat,
+                   "df": df, "bh": bh, "trades": trades}
+
+
+def _screen_rows(universe: dict, strategies: list[str], force: bool) -> pd.DataFrame:
+    """유니버스 x 전략 스크리닝 공용 루프 — 본 스크리닝과 확장 스크리닝이 공유."""
+    cfg = load_config()
+    ecfg = cfg["etf"]
+    boundary = pd.Timestamp(cfg["split"]["boundary"])
+
+    rows = []
+    for item in iter_screen_trades(universe, strategies, force):
+        trades = item["trades"]
+        if trades.empty:
+            continue
+        r = trades.set_index("entry_date")["net_ret"]
+        st = combo_stats(r)
+        st_first = combo_stats(r[r.index < boundary])
+        st_second = combo_stats(r[r.index >= boundary])
+        rows.append({
+            "etf": item["etf"], "code": item["code"], "strategy": item["strategy"],
+            "start": item["df"].index.min().date(), "bh_cum": item["bh"],
+            "n": st["n"], "avg_hold": trades["hold"].mean(),
+            "mean": st["mean"], "win": st["win_rate"], "cum": st["cum_ret"],
+            "mdd": st["mdd"], "t_stat": st["t_stat"],
+            "first_mean": st_first["mean"], "second_mean": st_second["mean"],
+            "sign_holds": bool(st_first["n"] >= 10 and st_second["n"] >= 10
+                               and st_first["mean"] > 0 and st_second["mean"] > 0),
+            "rankable": st["n"] >= ecfg["min_trades"],
+        })
     return (pd.DataFrame(rows)
             .sort_values("t_stat", ascending=False).reset_index(drop=True))
 

@@ -385,6 +385,29 @@ def cmd_fillcheck() -> None:
     run_fill_check()
 
 
+def cmd_mtest(force: bool) -> None:
+    from .multiple_testing import run_multiple_testing
+
+    res = run_multiple_testing(force)
+    tri, rc = res["trials"], res["rc"]
+    print(f"=== 다중검정 보정 (재현 시험 {len(tri)}개 / 선언 누적 탐색 {res['declared']}회) ===")
+    print(f"  [1] 기대 최대 t (엣지 0인데도 나오는 최고 t, 독립 가정): "
+          f"{res['emax_declared']:.2f}  ← Stage 1 게이트는 t>=2")
+    print(f"  [2] Reality Check p={rc['p_rc']:.3f} | SPA p={rc['p_spa']:.3f} "
+          f"(최고: {res['best_label']}, 일간 t={rc['best_t']:.2f})")
+    print(f"      상관 반영 유효 독립 시험 수 ≈ {res['n_eff']:.0f}/{len(tri)}개 "
+          f"(독립성 {res['indep_ratio']:.0%}) → 보정 기대 최대 t {res['emax_adjusted']:.2f}")
+    print("  [3] 후보별 DSR (선택편의+비정규성 반영, >=0.95 유의):")
+    for _, r in res["dsr"].iterrows():
+        mark = "통과" if r["dsr"] >= 0.95 else "미달"
+        print(f"      {r['label']:34s} N={int(r['n']):5d}  DSR={r['dsr']:.3f}  {mark}")
+    raw2 = int((tri["t_stat"] >= 2).sum())
+    print(f"  [4] 보정 후 생존: BH-FDR {int(tri['bh_pass'].sum())}개 / "
+          f"Holm {int(tri['holm_pass'].sum())}개 (무보정 t>=2 는 {raw2}개)")
+    print("\n측정 전용 — 판정 기준(etf_paper.judgment)은 동결 유지, 이 결과로 바꾸지 않는다.")
+    print("report:", RESULTS_DIR / "multiple_testing.md")
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -403,7 +426,7 @@ def main() -> None:
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
-                                 "cost", "judge", "distcheck", "fillcheck",
+                                 "cost", "judge", "distcheck", "fillcheck", "mtest",
                                  "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
@@ -431,6 +454,7 @@ def main() -> None:
         "judge": cmd_judge,
         "distcheck": cmd_distcheck,
         "fillcheck": cmd_fillcheck,
+        "mtest": lambda: cmd_mtest(args.force),
         "brief": cmd_brief,
         "health": cmd_health,
     }
