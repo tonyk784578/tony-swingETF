@@ -385,6 +385,35 @@ def cmd_fillcheck() -> None:
     run_fill_check()
 
 
+def cmd_holdout(force: bool) -> None:
+    from .holdout import run_holdout
+
+    res = run_holdout(force)
+    t, v = res["trials"], res["verdicts"]
+    print(f"=== 홀드아웃 검증 {res['start']} ~ {res['end']} (사전 등록 1회 실행) ===")
+    print("  ※ 2008 금융위기 미포함 — yfinance 2007~08 데이터 공백 (등록 시 명시)")
+    print("\n--- 후보별 (진단용) ---")
+    if t.empty:
+        print("  대상 없음")
+    else:
+        print(t[["name", "strategy", "years", "n", "mean", "win", "mdd", "t_stat",
+                 "stress_t"]]
+              .to_string(index=False,
+                         formatters={"mean": "{:+.3%}".format, "win": "{:.1%}".format,
+                                     "mdd": "{:.1%}".format, "t_stat": "{:.2f}".format,
+                                     "stress_t": "{:.2f}".format}))
+    print("\n--- 계열 판정 (사전 등록 규칙) ---")
+    for _, r in v.iterrows():
+        mean = "-" if not pd.notna(r["mean"]) else f"{r['mean']:+.3%}"
+        ts = "-" if not pd.notna(r["t_stat"]) else f"{r['t_stat']:.2f}"
+        print(f"  [{r['family']:9s}] {r['pool']:5s} 풀 N={int(r['n']):4d} "
+              f"평균 {mean} t={ts} (임계 {r['crit']}) → {r['outcome']}")
+    for label, why in res["skipped"]:
+        print(f"  (제외) {label}: {why}")
+    print("\n판정 기준·후보·파라미터는 이 결과로 바꾸지 않는다 (사후 기준 변경 금지).")
+    print("report:", RESULTS_DIR / "holdout.md")
+
+
 def cmd_mtest(force: bool) -> None:
     from .multiple_testing import run_multiple_testing
 
@@ -426,7 +455,7 @@ def main() -> None:
                         choices=["download", "verify", "backtest", "robustness", "report",
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
-                                 "cost", "judge", "distcheck", "fillcheck", "mtest",
+                                 "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
                                  "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
@@ -455,6 +484,7 @@ def main() -> None:
         "distcheck": cmd_distcheck,
         "fillcheck": cmd_fillcheck,
         "mtest": lambda: cmd_mtest(args.force),
+        "holdout": lambda: cmd_holdout(args.force),
         "brief": cmd_brief,
         "health": cmd_health,
     }

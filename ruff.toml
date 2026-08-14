@@ -8,5 +8,6 @@ select = ["E", "F", "W", "I", "B", "SIM", "UP"]
 # 마크다운 리포트 템플릿 f-string은 줄 길이 예외
 "src/ml_experiment.py" = ["E501"]
 "src/multiple_testing.py" = ["E501"]
+"src/holdout.py" = ["E501"]
 "src/portfolio.py" = ["E501"]
 "src/report.py" = ["E501"]
