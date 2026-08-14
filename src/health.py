@@ -247,6 +247,24 @@ def readiness_rows() -> list[dict]:
     except Exception as e:
         rows.append({"label": f"손절 검증 집계 실패: {e}", "n": 0, "need": 0,
                      "indent": 1, "ready_msg": "", "error": True})
+
+    # ML 메타라벨링 실행 게이트 (a) — 설계는 2026-08-11 봉인, 실행은 표본 대기.
+    # 판정 기준이 아니라 '실험을 열어도 되는가'의 문턱이라 여기 도달률만 표시한다.
+    gate = cfg.get("ml_metalabel", {}).get("gate", {})
+    if gate.get("minute_days"):
+        try:
+            from .minute_data import coverage, load_volbreak_minute
+
+            codes = cfg["minute"].get("etf_codes", [])
+            days = max((len(coverage(load_volbreak_minute(str(c)))) for c in codes),
+                       default=0)
+            rows.append({"label": "ML 메타라벨링 게이트(a) 분봉 축적", "n": days,
+                         "need": int(gate["minute_days"]), "indent": 1,
+                         "ready_msg": "게이트(a) 충족 — `fillcheck`로 (b) 확인 후 실행 판단"})
+        except Exception as e:
+            rows.append({"label": f"ML 게이트 집계 실패: {e}", "n": 0, "need": 0,
+                         "indent": 1, "ready_msg": "", "error": True})
+
     for r in rows:
         r["ready"] = bool(not r.get("error") and r["need"] and r["n"] >= r["need"])
     return rows

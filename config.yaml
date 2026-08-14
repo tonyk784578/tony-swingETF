@@ -10,6 +10,11 @@ snapshot:
   # 선물·환율 장중 시세는 소급 불가 → 매일 아침 프리뷰가 1행씩 축적.
   # 수집 전용: 어떤 신호·판정에도 쓰지 않는다. 향후 '아침 정보' 계열 가설을
   # 사전 등록할 때 정직한 point-in-time 재료가 된다 (paper/market_snapshots.csv).
+  #
+  # 개장(09:00) 이후 기록된 행은 '개장 전 정보'가 아니다 — 실제로 도입 당일
+  # (2026-08-10)에 22:35 기록분이 1행 섞여 있다. 과거 행을 고쳐 쓰지 않고
+  # taken_at 으로 판별한다: 기록 시 경고, 사용 시 load_snapshots(premarket_only=True).
+  premarket_deadline: "09:00"
   tickers:
     "NQ=F": nasdaq_fut      # 나스닥100 선물 — 개장 전 글로벌 방향
     "ES=F": sp_fut          # S&P500 선물
@@ -524,6 +529,11 @@ ml_metalabel:
   #   (a) fillcheck 분봉 표본 120거래일 이상 축적
   #   (b) 그 표본에서 보수 체결(도달 5분봉 종가) 기준 평균 순수익이 양수인
   #       volbreak 후보 1개 이상 존재 — 체결 문제로 죽는 전략에 필터는 무의미
+  # 아래 gate 블록은 위 (a)(b)를 코드가 읽는 형태로 옮긴 것 — 2026-08-11 봉인분과
+  # 같은 값이며 새 파라미터가 아니다 (health/fillcheck 가 도달률을 매일 표시하도록).
+  gate:
+    minute_days: 120           # (a) 분봉 표본 축적 거래일
+    min_positive_candidates: 1 # (b) 보수 체결 평균 양수 후보 최소 수
   #
   # 프로토콜 (기존 ml 실험 관례 동결값 재사용 — 자유도 제거):
   #   모델 LGBMClassifier, 하이퍼파라미터는 위 ml.model 값 그대로 (튜닝 금지).

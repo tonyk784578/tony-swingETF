@@ -38,3 +38,34 @@ def test_failed_ticker_recorded_as_nan_not_dropped(monkeypatch, tmp_path):
     snapshot.record_market_snapshot()
     row = pd.read_csv(path).iloc[0]
     assert row["a"] == 42.0 and pd.isna(row["b"])   # 한 소스 장애가 행을 못 막음
+
+
+def test_premarket_flag_uses_configured_deadline(monkeypatch):
+    """개장 후 기록은 '아침 정보'가 아니다 — 2026-08-10 22:35 행 사례."""
+    monkeypatch.setattr(snapshot, "load_config",
+                        lambda: {"snapshot": {"premarket_deadline": "09:00"}})
+    assert snapshot.is_premarket("2026-08-14 08:40:28")
+    assert not snapshot.is_premarket("2026-08-10 22:35:53")
+    assert not snapshot.is_premarket("2026-08-10 09:00:00")   # 경계는 개장 후
+    assert not snapshot.is_premarket("not-a-time")            # 파싱 실패는 보수적으로
+
+
+def test_load_snapshots_can_exclude_post_open_rows(monkeypatch, tmp_path):
+    path = tmp_path / "market_snapshots.csv"
+    monkeypatch.setattr(snapshot, "_snapshot_path", lambda: path)
+    monkeypatch.setattr(snapshot, "load_config",
+                        lambda: {"snapshot": {"premarket_deadline": "09:00"}})
+    pd.DataFrame({
+        "date": ["2026-08-10", "2026-08-11"],
+        "taken_at": ["2026-08-10 22:35:53", "2026-08-11 08:45:13"],
+        "nasdaq_fut": [1.0, 2.0],
+    }).to_csv(path, index=False)
+
+    assert len(snapshot.load_snapshots()) == 2                    # 기록은 보존
+    kept = snapshot.load_snapshots(premarket_only=True)
+    assert len(kept) == 1 and kept["nasdaq_fut"].iloc[0] == 2.0   # 오염 행만 제외
+
+
+def test_load_snapshots_returns_empty_when_file_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(snapshot, "_snapshot_path", lambda: tmp_path / "none.csv")
+    assert snapshot.load_snapshots().empty

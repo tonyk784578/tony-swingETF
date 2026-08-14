@@ -2,6 +2,13 @@
 
 yfinance는 5분봉을 최근 약 60일까지만 제공하므로, 매일 받아서 parquet에
 append(중복 제거)하며 장기 이력을 직접 쌓는다. 인덱스는 KST tz-naive.
+
+**알려진 커버리지 한계 (2026-08-14 실측)**: 하루치가 09:00~14:55 (72봉)뿐이고
+**마감 30분(15:00~15:30, 정규장 종료 15:20 + 종가 동시호가)이 빠져 있다.**
+소스의 제약이라 우회 불가. 영향 측정 결과 volbreak 트리거 도달일 138건 중
+분봉에서 도달 봉을 못 찾은 건 1건(1%) — 돌파는 대개 장 초반에 터지기 때문이라
+실질 영향은 작지만, 이 비율은 `fillcheck`가 매번 리포트에 찍는다(침묵 금지).
+`intraday_window()`가 실제 커버 구간을 반환하므로 한계가 변하면 드러난다.
 """
 
 from __future__ import annotations
@@ -87,3 +94,17 @@ def coverage(minute: pd.DataFrame) -> pd.DatetimeIndex:
     if minute.empty:
         return pd.DatetimeIndex([])
     return pd.DatetimeIndex(sorted(set(minute.index.normalize())))
+
+
+def intraday_window(minute: pd.DataFrame) -> dict:
+    """실제로 커버되는 장중 구간 — {first, last, bars_median, days}.
+
+    소스가 마감 30분을 안 주는 것(모듈 docstring)을 숫자로 드러내는 용도.
+    한계가 변하면(예: 공급선 교체로 15:30까지 들어오면) 여기서 바로 보인다.
+    """
+    if minute.empty:
+        return {"first": None, "last": None, "bars_median": 0, "days": 0}
+    idx = pd.DatetimeIndex(minute.index)
+    per_day = pd.Series(1, index=idx).groupby(idx.normalize()).sum()
+    return {"first": min(idx.time), "last": max(idx.time),
+            "bars_median": int(per_day.median()), "days": int(len(per_day))}
