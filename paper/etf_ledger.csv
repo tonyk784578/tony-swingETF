@@ -15,3 +15,5 @@
 2026-08-14,2026-08-18,KODEX_Battery,volbreak,1,-0.003886,ok
 2026-08-18,2026-08-19,KODEX_Lev,volbreak,1,-0.198642,ok
 2026-08-18,2026-08-19,KODEX_Semicon,volbreak,1,-0.114929,ok
+2026-08-19,2026-08-20,KODEX_Battery,volbreak,1,0.012305,ok
+2026-08-19,2026-08-20,KODEX_Semicon,volbreak,1,0.00665,ok
