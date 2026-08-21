@@ -17,3 +17,7 @@
 2026-08-18,2026-08-19,KODEX_Semicon,volbreak,1,-0.114929,ok
 2026-08-19,2026-08-20,KODEX_Battery,volbreak,1,0.012305,ok
 2026-08-19,2026-08-20,KODEX_Semicon,volbreak,1,0.00665,ok
+2026-08-20,2026-08-21,KODEX_Battery,volbreak,1,-0.042368,late
+2026-08-20,2026-08-21,KODEX_Lev,volbreak,1,-0.003239,late
+2026-08-20,2026-08-21,KODEX_Securities,volbreak,1,-0.012902,late
+2026-08-20,2026-08-21,KODEX_Semicon,volbreak,1,-0.011688,late
