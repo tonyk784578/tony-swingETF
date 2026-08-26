@@ -45,6 +45,12 @@ src/rotation.py      # [ETF] 듀얼 모멘텀 로테이션 (실험1 기각 / 실
 src/multiple_testing.py # [ETF] 다중검정 보정 (DSR·Reality Check·SPA·FDR — 측정 전용)
 src/holdout.py       # [ETF] 홀드아웃 검증 (2009~2014 안 본 구간 — 사전 등록·1회 완료)
 src/overnight_check.py # [ETF] overnight 진단 (교정 t·volbreak 중복·홀드아웃 확인)
+src/flow_data.py     # [ETF] 외국인 수급 수집 (네이버 — flow 기각 후 수동 백필 전용)
+src/flow_check.py    # [ETF] flow 진단 (기각 기록 재현용)
+src/crossmarket.py   # [ETF] 교차 시장 복제 (미국 지수 2000~2014 — 1회 완료·실패)
+src/sleeve_report.py # 통합 슬리브 리스크 뷰 (전 섀도 한 계좌 관점 — 측정 전용)
+src/kis.py           # KIS 모의투자 클라이언트 (모의 도메인 하드코딩 — 실계좌 경로 없음)
+src/executor.py      # Phase D 실행기 (dry-run 기본 — paper/exec_plan.csv 증빙)
 src/health.py        # 헬스체크 + 판정 준비 상태 (+판정 도달 알림)
 src/brief.py         # 일일 브리핑 STATUS.md + 주문 계획 환산 (운영 편의 계층)
 src/main.py          # CLI (디스패치 테이블)
@@ -80,6 +86,9 @@ python -m src.main fillcheck       # volbreak 체결 검증 (분봉 실측 — �
 python -m src.main mtest           # 다중검정 보정 (144회 탐색 사후 진단 — 측정만)
 python -m src.main holdout         # 홀드아웃 검증 (2009~2014 — 1회 실행 완료, 재현용)
 python -m src.main rotation        # 로테이션 실험1(기각) 재현 + 실험2(확장, 통과) 재현
+python -m src.main sleeves         # 통합 슬리브 리스크 뷰 (중복 보유·슬리브 상관 — 측정만)
+python -m src.main xmarket         # 교차 시장 복제 (1회 완료·실패 — 재현용)
+python -m src.main trade           # Phase D 실행기 dry-run (--live-mock 제출, 모의 전용)
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
 python -m src.main brief           # STATUS.md 수동 갱신 (paper/preview 가 자동 갱신)
@@ -426,6 +435,55 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
 - **일일 수집 안 함** (ewy 관례): cmd_download에서 flow 갱신 제거 — 소급
   가능하므로 필요 시점에 받으면 된다. 캐시·모듈은 재현용 잔존.
   상세: results/flow_screening.md
+
+## 운영 체제 개정 + KIS 계좌 이관 (2026-08-26 — 전문가 검토 후속)
+
+- **KIS 계좌 이관 (사용자 결정)**: SwingETF의 주식 모의계좌를 인수 — SwingETF
+  자동매매 종료 확정에 따라. `.env`에 앱키·시크릿·계좌번호 이관(기존
+  선물옵션 계열 값은 주석 보존, `.env.bak.premigration` 백업). 토큰 발급·잔고
+  조회 검증 완료 (총평가 950만원, **SwingETF 잔여 보유 20종목 잔존** —
+  `trade --live-mock --liquidate-legacy`로 청산 가능, 아직 미실행).
+  SwingETF 쪽은 KIS 진입점 7곳(주문·수집·킵얼라이브·헬스체크)에 가드 삽입
+  (git 저장소가 아니라 파일 수정만). 같은 앱키로 두 시스템이 토큰을 발급하면
+  서로 폐기시키므로 전면 중지가 필수였음. crontab의 SwingETF KIS 라인 주석
+  처리는 권한 제약으로 대기 — 준비된 파일로 수동 1회 적용 필요.
+- **Phase D 실행기 개시**: `src/kis.py` — 모의 도메인 하드코딩, **실계좌
+  경로가 코드에 존재하지 않음** (판정 전 실거래 금지의 코드 수준 강제).
+  `src/executor.py` `trade` — dry-run 기본, 시가 진입 계열만 제출 가능
+  (volbreak은 KIS 조건부 주문 미지원, overnight는 15:20 실행 창 밖 — 계획
+  표시만, 라이브화 선행 과제로 명시). 계획·제출은 paper/exec_plan.csv에
+  타임스탬프 증빙. 모의 체결 vs 모형 체결 비교가 최종 fillcheck가 된다.
+- **실전 투입 게이트 등록** (config `etf_paper.execution_gate` — 판정 표본이
+  쌓이기 전 동결): 판정 통과가 전제인 2차 관문. volbreak = fillcheck 보수
+  체결 평균>0 AND 분봉 120거래일 / 기타 = preview ok 부분집합 평균>0 AND
+  ok 비율 50%+. `judge`가 매 실행 상태 표시, `fillcheck`가 판독용 CSV 생성.
+- **기타 운영 보강**: 오프사이트 push 주간→일일(소급 불가 자산 노출 창 축소),
+  `sleeves` 통합 슬리브 뷰(동일 ETF 중복 보유·슬리브 상관 — STATUS에 중복
+  경고 상시 표시, 첫 실행에서 Semicon volbreak+overnight 중복 실검출),
+  `judge`에 판정 표본 레짐 구성(폭락 구간 진입 비율) 병기, `PREMORTEM.md`
+  (시나리오별 사전 결정 — 관측 중 규칙 훼손 방지 커밋먼트).
+
+## 교차 시장 복제 (2026-08-26, `xmarket` — 사전 등록·1회 완료: **실패**)
+
+- **왜**: trend 계열은 홀드아웃 "판별 불가" + 포워드 판정 2.3년 대기 —
+  동결 규칙을 다른 시장·시대에 재현하는 시험이 시험 수를 늘리지 않고 얻을
+  수 있는 유일한 추가 독립 증거였다. 등록 전문 `PREREG_xmarket.md`,
+  실행 전 커밋 1364bf8.
+- **설계**: trend 3전략(하우스 파라미터, 기본 exit — 채택 trail 변형은 한국
+  선택의 산물이라 배제)을 미국 지수 ETF 4종(SPY/QQQ/DIA/IWM)의
+  **2000~2014**(닷컴 붕괴+2008 포함, 한국 인샘플과 시대 불겹침)에 적용.
+  미조정 원가격(배당 낙폭이 불리한 방향)·비용 0.1% 유지 — 보수적 시험.
+- **결과: 실패** — 계열 풀 N=1,475, 평균 **-0.145%**, 단측 t=-1.96.
+  **12/12 조합이 음수 또는 0** (승률 28~54%). 등록 규칙대로 "재현 안 됨 —
+  포워드 판정 통과 시에도 반증 자료로 병기".
+- **trend 계열 증거 현황 (정직한 집계)**: 인샘플 통과(t 2.0~2.6) /
+  mtest 잡음 상한 이하 / 홀드아웃 KR 판별 불가(+0.145%, t=0.72) /
+  **교차 시장 실패(음수)**. 세 독립 시험 어디서도 재현되지 않았다 —
+  trend 계열의 판정 생존 확률은 낮다고 보는 것이 정직한 현재 평가다.
+  **판정 절차는 동결대로 진행** (이 시험이 바꾸는 것은 기록되는 결론뿐).
+  대조: volbreak은 mtest·홀드아웃 모두 통과 — 계열 간 증거 격차가 뚜렷하다.
+- declared_trials(160) 불가산 (동결 규칙 재현 시험). 1회 실행 — 재실행은
+  리포트 재생성만. 상세: results/xmarket.md
 
 ## 폭락 대비 검토 (2026-08-07, `crash` 단계 — 판정 완료, 게이트 재실험 금지)
 
