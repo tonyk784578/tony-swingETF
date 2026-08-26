@@ -169,6 +169,22 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   자동매매(KIS 연동)가 구현되면 이 목록에서 판정 통과 후보를 골라 실행한다 —
   별도 선택 메커니즘을 새로 만들지 말 것.
 
+## 코드·보안·구조 재검토 (2026-08-26 완료 — 08-26 신규 모듈 전체)
+
+- 보안: `.env.bak.premigration`(이관 백업, 실자격증명)이 gitignore 밖 —
+  `.env.*` 패턴 추가로 차단. 이관·백업 파일은 항상 이 패턴 안에 만들 것.
+- 정확성 6건 수정: liquidate-legacy 전량 매도 → `ops.legacy_codes` 동결
+  목록 한정(실행기 포지션 오인 청산 방지), kis 토큰 만료 복구 no-op →
+  죽은 토큰 비교 후 강제 재발급 + 비JSON 방어 + order_cash를 `_request`
+  경로로 통합, 연속 주문 0.6s 간격(초당 2건 실측), overnight 엔진 빈
+  프레임 방어, overnight_check 리스크 그룹 |ρ| 교정(등록 규칙 일치),
+  judge 레짐 집계 NaN 오인 방어.
+- 구조 2건 수정: order_plan에 code 필드(실행기 역조인 제거), sleeve 상관
+  수동 union → DataFrame 생성자.
+- 남긴 권고 3건 (동작 무해 — 다음 손볼 때): flow_check/overnight_check
+  사본 구조의 공용 모듈화, 게이트 술어(rankable&sign_holds&t>=2) 5곳
+  중복의 helper 단일화, 동일 ETF 중복 보유 감지 이중 구현 통합.
+
 ## 코드·보안·구조 재검토 (2026-08-07 완료 — 08-06 이후 신규 모듈 포함 전 코드)
 
 - 보안: 공격면은 PowerShell 알림 문자열 보간 1곳 — `_ps_quote()`로 정제
