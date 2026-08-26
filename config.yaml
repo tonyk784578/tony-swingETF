@@ -28,6 +28,10 @@ ops:
   exposure: 0.41             # 총노출 — portfolio 부트스트랩 q5 캘리브레이션 권고
                              # (2026-08-10 반영: 구 점추정 0.58 → 분위수 기준 0.41)
   notify_signals: true       # 아침 신호 발동 시 데스크톱 알림
+  trade_mode: dry_run        # 아침 자동 실행기 모드: dry_run(계획만 기록) |
+                             # live_mock(KIS 모의계좌 실제 제출 — 모의 전용 클라이언트).
+                             # 운영 편의 값 — dry_run 로그가 며칠 깨끗하면 live_mock 전환 권장.
+                             # 실계좌 경로는 코드에 없음 (판정+실전투입게이트 통과 전 금지)
 
 data:
   start: "2015-01-01"

@@ -81,7 +81,10 @@ def build_plan() -> list[dict]:
     return out
 
 
-def run_trade(live_mock: bool = False, liquidate_legacy: bool = False) -> None:
+def run_trade(live_mock: bool = False, liquidate_legacy: bool = False,
+              auto: bool = False) -> None:
+    if auto:   # 아침 cron 경로 — 모드는 config ops.trade_mode (운영 편의 값)
+        live_mock = load_config().get("ops", {}).get("trade_mode") == "live_mock"
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
     now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "live_mock" if live_mock else "dry_run"

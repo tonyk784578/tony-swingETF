@@ -17,6 +17,10 @@ case "${1:-evening}" in
     {
       echo "===== morning preview $(date '+%F %T') ====="
       "$PY" -m src.main paper --preview --force
+      # Phase D 실행기 (2026-08-26): 오늘 신호를 주문 계획으로 번역해 기록.
+      # 모드는 config ops.trade_mode (dry_run 기본 / live_mock 전환 시 모의 제출).
+      # 실패해도 아침 루틴은 계속 (증빙 누락은 exec_plan.csv 공백으로 드러남)
+      "$PY" -m src.main trade --auto || echo "[WARN] trade step failed"
     } >>"$LOG" 2>&1
     ;;
   evening)
@@ -25,6 +29,8 @@ case "${1:-evening}" in
       "$PY" -m src.main download --force
       "$PY" -m src.main minute
       "$PY" -m src.main paper
+      # 통합 슬리브 뷰 갱신 (2026-08-26): 중복 보유·슬리브 상관 일일 기록
+      "$PY" -m src.main sleeves || echo "[WARN] sleeves step failed"
       "$PY" -m src.main health
       # 장부 스냅샷 자동 커밋 (포워드 기록 보호 — paper/ 경로만, 로컬 커밋)
       git -C "$ROOT" add paper/ >/dev/null 2>&1 || true

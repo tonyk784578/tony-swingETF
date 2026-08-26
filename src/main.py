@@ -494,10 +494,10 @@ def cmd_xmarket(force: bool) -> None:
     run_crossmarket(force)
 
 
-def cmd_trade(live_mock: bool, liquidate_legacy: bool) -> None:
+def cmd_trade(live_mock: bool, liquidate_legacy: bool, auto: bool = False) -> None:
     from .executor import run_trade
 
-    run_trade(live_mock=live_mock, liquidate_legacy=liquidate_legacy)
+    run_trade(live_mock=live_mock, liquidate_legacy=liquidate_legacy, auto=auto)
 
 
 def cmd_report() -> None:
@@ -527,6 +527,8 @@ def main() -> None:
                         help="trade: KIS 모의계좌에 실제 주문 제출 (기본은 dry-run)")
     parser.add_argument("--liquidate-legacy", action="store_true",
                         help="trade: SwingETF 잔여 보유 전량 시장가 청산 (--live-mock 필요)")
+    parser.add_argument("--auto", action="store_true",
+                        help="trade: cron 경로 — 모드를 config ops.trade_mode에서 읽음")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -554,7 +556,7 @@ def main() -> None:
         "holdout": lambda: cmd_holdout(args.force),
         "sleeves": lambda: cmd_sleeves(args.force),
         "xmarket": lambda: cmd_xmarket(args.force),
-        "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy),
+        "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy, args.auto),
         "brief": cmd_brief,
         "health": cmd_health,
     }
