@@ -265,6 +265,23 @@ def cmd_etf(force: bool) -> None:
                                         "평균수익(전조합)": "{:+.2%}".format}))
     print("report:", RESULTS_DIR / "strategy_compare.md")
 
+    # overnight 부속 진단 (사전 등록 약속 — 교정 t·volbreak 중복·홀드아웃 확인).
+    # 데이터는 직전 run_screening 이 이미 갱신했으므로 재다운로드하지 않는다.
+    from .overnight_check import run_overnight_check
+
+    oc = run_overnight_check(df, force=False)
+    print("\n=== overnight 진단 (사전 등록 부속표) ===")
+    print(f"풀 t: 나이브 {oc['naive_t']:.2f} → 일 단위 교정 {oc['daily_t']:.2f} "
+          f"({oc['daily_n']}일) | volbreak 슬리브 상관 ρ={oc['corr_union']:.2f}"
+          + (" — 같은 리스크 그룹 취급" if oc["same_group"] else ""))
+    if oc["passers"].empty:
+        print("게이트 통과 0건 — 홀드아웃 확인 대상 없음 (등록된 예상 시나리오)")
+    else:
+        print(f"게이트 통과 {len(oc['passers'])}건 → 홀드아웃 방향 확인:")
+        for _, r in oc["holdout"].iterrows():
+            print(f"  {r['etf']}: {r['verdict']}")
+    print("report:", RESULTS_DIR / "overnight_screening.md")
+
 
 def cmd_portfolio(force: bool) -> None:
     from .portfolio import run_portfolio

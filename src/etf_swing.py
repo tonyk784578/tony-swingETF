@@ -107,6 +107,34 @@ def volbreak_trigger(df: pd.DataFrame, k: float) -> float:
     return float(k * (df["High"].iloc[-1] - df["Low"].iloc[-1]))
 
 
+def simulate_overnight(df: pd.DataFrame, entry_above: float, cost: float,
+                       return_open: bool = False):
+    """오버나이트 전용 엔진 — 장중 양봉이면 종가 매수, 익일 시가 매도.
+
+    일반 simulate()는 '신호 다음날 시가 진입'이라 당일 종가(동시호가) 진입을
+    표현할 수 없어 전용 엔진을 둔다 (사전 등록 — config etf.strategies.overnight).
+    - 신호(D) = 종가(D)/시가(D) - 1 > entry_above (부호 컷 0 — D 종가 시점 정보만)
+    - 진입 = D 종가 (마감 동시호가 근사), 청산 = D+1 시가. 보유 1일 고정.
+    - 마지막 봉 신호는 다음 시가가 없으므로 미완성 처리 (volbreak 관례).
+    """
+    sig = (df["Close"] / df["Open"] - 1 > entry_above).fillna(False)
+    trades = []
+    for i in range(len(df) - 1):
+        if sig.iloc[i]:
+            trades.append({
+                "entry_date": df.index[i], "exit_date": df.index[i + 1], "hold": 1,
+                "net_ret": df["Open"].iloc[i + 1] / df["Close"].iloc[i] - 1 - cost,
+            })
+    result = pd.DataFrame(trades)
+    if not return_open:
+        return result
+    open_pos = None
+    if sig.iloc[-1]:
+        open_pos = {"entry_date": df.index[-1], "entry_price": df["Close"].iloc[-1],
+                    "hold": 0, "unrealized": 0.0}
+    return result, open_pos
+
+
 def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) -> pd.Series:
     """전략의 원신호 — 마지막 값이 True면 '다음 개장 시가 진입'.
 
@@ -236,6 +264,9 @@ def iter_screen_trades(universe: dict, strategies: list[str], force: bool):
         for strat in strategies:
             if strat == "volbreak":   # 장중 체결 모형 — 전용 엔진 (플래그 방식 밖)
                 trades = simulate_volbreak(df, ecfg["strategies"]["volbreak"]["k"], cost)
+            elif strat == "overnight":   # 종가 진입 모형 — 전용 엔진 (플래그 방식 밖)
+                trades = simulate_overnight(
+                    df, ecfg["strategies"]["overnight"]["entry_above"], cost)
             else:
                 us_series = ewy_mapped if strat.startswith("ewy_") else us_mapped
                 entry, exit_, max_hold = build_flags(df, strat, us_series)
@@ -334,6 +365,7 @@ _STRATEGY_STATUS = {
     "volbreak":   "6/12 통과 — Stage 2 섀도 (후보별 Bonferroni 판정, 후반 감쇠 주의)",
     "ewy_up1":    "종결 — 기각 (0/2). 야간 정보는 시가에 이미 반영",
     "ewy_up2":    "종결 — 기각 (0/2). us_dip과 함께 '미국 신호→ETF 시가' 계열 완전 종결",
+    "overnight":  "2026-08-26 사전 등록 (PREREG_overnight.md) — 1회 시험",
 }
 
 
