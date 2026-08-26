@@ -117,6 +117,9 @@ def simulate_overnight(df: pd.DataFrame, entry_above: float, cost: float,
     - 진입 = D 종가 (마감 동시호가 근사), 청산 = D+1 시가. 보유 1일 고정.
     - 마지막 봉 신호는 다음 시가가 없으므로 미완성 처리 (volbreak 관례).
     """
+    if df.empty:   # 빈 프레임 방어 — 아래 sig.iloc[-1] 이 IndexError 가 된다
+        empty = pd.DataFrame()
+        return (empty, None) if return_open else empty
     sig = (df["Close"] / df["Open"] - 1 > entry_above).fillna(False)
     trades = []
     for i in range(len(df) - 1):

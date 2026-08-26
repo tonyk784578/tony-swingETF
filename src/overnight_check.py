@@ -83,7 +83,8 @@ def run_overnight_check(screen: pd.DataFrame, force: bool = False) -> dict:
     co_active = on_sleeve.index.intersection(vb_sleeve.index)
     corr_active = (float(on_sleeve.loc[co_active].corr(vb_sleeve.loc[co_active]))
                    if len(co_active) >= 2 else float("nan"))
-    same_group = corr_union > 0.5 or corr_active > 0.5
+    # 등록 규칙은 |ρ|>0.5 (부호 무관) — abs 없이 비교하면 음의 상관을 놓친다
+    same_group = abs(corr_union) > 0.5 or abs(corr_active) > 0.5
 
     # 3. 게이트 통과분 홀드아웃 방향 확인 (사전 등록 — 통과 후보에 한해 1회)
     mask = (screen["strategy"].eq("overnight") & screen["rankable"]

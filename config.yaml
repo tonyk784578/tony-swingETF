@@ -28,6 +28,9 @@ ops:
   exposure: 0.41             # 총노출 — portfolio 부트스트랩 q5 캘리브레이션 권고
                              # (2026-08-10 반영: 구 점추정 0.58 → 분위수 기준 0.41)
   notify_signals: true       # 아침 신호 발동 시 데스크톱 알림
+  legacy_codes: ["139660", "143850"]   # SwingETF 이관 잔여 매도 실패분 (2026-08-26 동결)
+                             # — liquidate-legacy 는 이 목록만 매도한다. 실행기가 연
+                             # 포지션을 오인 청산하는 사고 방지. 청산 완료 후 비울 것
   trade_mode: dry_run        # 아침 자동 실행기 모드: dry_run(계획만 기록) |
                              # live_mock(KIS 모의계좌 실제 제출 — 모의 전용 클라이언트).
                              # 운영 편의 값 — dry_run 로그가 며칠 깨끗하면 live_mock 전환 권장.

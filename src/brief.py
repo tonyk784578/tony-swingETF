@@ -36,6 +36,7 @@ def order_plan(states: list[dict], capital: float, exposure: float,
         amount = capital * exposure / 3 / lev
         qty = int(amount // st["last_close"]) if st["last_close"] > 0 else 0
         plans.append({"name": st["cand"]["name"], "strategy": st["cand"]["strategy"],
+                      "code": str(st["cand"]["code"]),
                       "price_ref": st["last_close"], "weight": exposure / 3 / lev,
                       "amount": amount, "qty": qty})
     return plans

@@ -1,5 +1,6 @@
-# 자격증명 — 절대 커밋 금지
+# 자격증명 — 절대 커밋 금지 (.env.bak.premigration 등 백업/변형 포함)
 .env
+.env.*
 
 .venv/
 __pycache__/

@@ -164,7 +164,12 @@ def _regime_composition(cfg: dict, led: pd.DataFrame) -> None:
             continue
         px = load_symbol(code, "kr")["Close"]
         crash = (px / px.rolling(60).max() - 1) <= -0.10
-        flags = [bool(crash.asof(d)) for d in pd.to_datetime(sub["entry_date"])]
+        # asof 는 인덱스 시작 전 날짜에 NaN 을 주고 bool(NaN)=True 라 폭락으로
+        # 오인된다 — notna 필터 후 집계
+        vals = [crash.asof(d) for d in pd.to_datetime(sub["entry_date"])]
+        flags = [bool(v) for v in vals if pd.notna(v)]
+        if not flags:
+            continue
         fam = next((c.get("family", "trend") for c in cfg["etf_paper"]["candidates"]
                     if c["name"] == name and c["strategy"] == strat), "trend")
         fam_stats.setdefault(fam, []).extend(flags)

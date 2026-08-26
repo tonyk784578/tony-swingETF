@@ -87,16 +87,24 @@ class KIS:
                 "appkey": self.key, "appsecret": self.secret, "tr_id": tr_id}
 
     def _request(self, method: str, path: str, tr_id: str, *,
-                 params: dict | None = None, body: dict | None = None) -> dict:
+                 params: dict | None = None, body: dict | None = None,
+                 extra_headers: dict | None = None) -> dict:
         for attempt in (1, 2):
-            r = requests.request(method, f"{MOCK_BASE}{path}",
-                                 headers=self._headers(tr_id),
+            headers = self._headers(tr_id)
+            if extra_headers:
+                headers.update(extra_headers)
+            r = requests.request(method, f"{MOCK_BASE}{path}", headers=headers,
                                  params=params, json=body, timeout=15)
-            d = r.json()
+            try:
+                d = r.json()
+            except ValueError as e:   # 게이트웨이 HTML 등 비JSON 응답 방어
+                raise RuntimeError(f"KIS 응답 파싱 실패 HTTP {r.status_code}: "
+                                   f"{r.text[:200]}") from e
             if d.get("msg_cd") == "EGW00123" and attempt == 1:   # 토큰 만료 — 승계/재발급
-                self._load_token_cache()
-                if not self._valid():
-                    self._token = None
+                dead = self._token
+                self._load_token_cache()   # 다른 프로세스가 저장한 최신 토큰 승계 시도
+                if self._token == dead:    # 디스크에도 같은 죽은 토큰 → 재발급 강제
+                    self._token, self._expires = None, datetime.min
                 continue
             if r.status_code != 200 or d.get("rt_cd") != "0":
                 raise RuntimeError(f"KIS 오류 {r.status_code}/{d.get('msg_cd')}: "
@@ -129,20 +137,16 @@ class KIS:
         return r.json()["HASH"]
 
     def order_cash(self, code: str, qty: int, side: str, price: int = 0) -> dict:
-        """현금 주문. side: buy|sell, price=0 → 시장가. 반환: output(주문번호 등)."""
+        """현금 주문. side: buy|sell, price=0 → 시장가. 반환: output(주문번호 등).
+
+        _request 경로를 그대로 타므로 토큰 만료 복구·비JSON 방어가 주문에도 적용된다.
+        """
         if qty <= 0:
             raise ValueError(f"수량 오류: {qty}")
         body = {"CANO": self.cano, "ACNT_PRDT_CD": self.prdt, "PDNO": code,
                 "ORD_DVSN": "01" if price <= 0 else "00",
                 "ORD_QTY": str(qty), "ORD_UNPR": str(max(price, 0))}
         tr = TR["order_buy"] if side == "buy" else TR["order_sell"]
-        if not self._valid():
-            self._issue()
-        headers = self._headers(tr)
-        headers["hashkey"] = self._hashkey(body)
-        r = requests.post(f"{MOCK_BASE}/uapi/domestic-stock/v1/trading/order-cash",
-                          headers=headers, json=body, timeout=15)
-        d = r.json()
-        if r.status_code != 200 or d.get("rt_cd") != "0":
-            raise RuntimeError(f"주문 실패 {d.get('msg_cd')}: {d.get('msg1', '').strip()}")
+        d = self._request("POST", "/uapi/domestic-stock/v1/trading/order-cash", tr,
+                          body=body, extra_headers={"hashkey": self._hashkey(body)})
         return d.get("output", {})

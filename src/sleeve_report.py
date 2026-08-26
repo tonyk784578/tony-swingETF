@@ -66,12 +66,8 @@ def run_sleeves(force: bool = False) -> dict:
         for sl, g in led2.groupby("sleeve"):
             sleeve_daily[sl] = g.groupby("exit_date")["net_ret"].mean()
         if len(sleeve_daily) >= 2:
-            union = None
-            for s in sleeve_daily.values():
-                union = s.index if union is None else union.union(s.index)
-            mat = pd.DataFrame({k: v.reindex(union).fillna(0.0)
-                                for k, v in sleeve_daily.items()})
-            corr = mat.corr()
+            # DataFrame 생성자가 인덱스 외부조인을 해 준다 — 비활동일은 현금(0%)
+            corr = pd.DataFrame(sleeve_daily).fillna(0.0).corr()
 
     # 3. 같은 밤 동일 ETF 중복 보유 이력 (1일 회전 계열)
     overlap_rows = []

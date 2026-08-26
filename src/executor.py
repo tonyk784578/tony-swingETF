@@ -60,10 +60,7 @@ def build_plan() -> list[dict]:
                        cfg.get("portfolio", {}).get("leverage", {}))
     out = []
     for p in plans:
-        code = next(str(st["cand"]["code"]) for st in states
-                    if st["cand"]["name"] == p["name"]
-                    and st["cand"]["strategy"] == p["strategy"])
-        out.append({"action": "buy_open", "code": code, "name": p["name"],
+        out.append({"action": "buy_open", "code": p["code"], "name": p["name"],
                     "strategy": p["strategy"], "qty": p["qty"],
                     "note": f"시가 진입 신호 (비중 {p['weight']:.1%})"})
     for st in states:   # 제출 불가 계열은 계획으로만 기록 (한계의 정직한 표시)
@@ -112,9 +109,12 @@ def run_trade(live_mock: bool = False, liquidate_legacy: bool = False,
             if (p["name"], p["strategy"]) in submitted_today:
                 line += " (오늘 이미 제출 — 스킵)"
             else:
+                import time
+
                 from .kis import KIS
                 kis = kis or KIS()
                 try:
+                    time.sleep(0.6)   # 모의 레이트리밋 초당 2건 방어
                     res = kis.order_cash(p["code"], int(p["qty"]), "buy")
                     order_no = res.get("ODNO", "")
                     line += f" → 제출 odno={order_no}"
@@ -132,15 +132,25 @@ def run_trade(live_mock: bool = False, liquidate_legacy: bool = False,
 
 
 def _liquidate_legacy(today: str, now: str) -> None:
-    """SwingETF 이관 잔여 보유 전량 시장가 청산 — 새 프로그램의 깨끗한 출발선."""
+    """SwingETF 이관 잔여 보유 청산 — config ops.legacy_codes 목록만 매도.
+
+    잔고 전체를 팔면 실행기가 나중에 연 포지션까지 청산하는 사고가 되므로,
+    이관 시점에 동결한 목록으로 대상을 한정한다.
+    """
+    import time
+
     from .kis import KIS
 
+    legacy = set(load_config().get("ops", {}).get("legacy_codes", []))
+    if not legacy:
+        print("legacy_codes 비어 있음 — 청산 대상 없음 (이미 완료)")
+        return
     kis = KIS()
-    bal = kis.balance()
-    print(f"=== 잔여 보유 청산 — {len(bal['holdings'])}종목, "
-          f"평가 {sum(h['value'] for h in bal['holdings']):,}원 ===")
+    targets = [h for h in kis.balance()["holdings"] if h["code"] in legacy]
+    print(f"=== 잔여 보유 청산 — 대상 {len(targets)}종목 (동결 목록 {len(legacy)}건 한정) ===")
     rows = []
-    for h in bal["holdings"]:
+    for h in targets:
+        time.sleep(0.6)   # 모의 레이트리밋 초당 2건(EGW00201) 방어
         try:
             res = kis.order_cash(h["code"], h["qty"], "sell")
             odno = res.get("ODNO", "")
