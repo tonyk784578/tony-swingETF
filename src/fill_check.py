@@ -73,6 +73,7 @@ def run_fill_check() -> None:
     print("=== volbreak 체결 검증 (분봉 표본 구간) ===")
     n_hit = n_drop = n_pos = 0
     window = None
+    csv_rows = []   # 실전 투입 게이트(judge)가 기계 판독 — results/volbreak_fill_check.csv
     for cand in vb:
         code = str(cand["code"])
         minute = load_volbreak_minute(code)
@@ -101,6 +102,9 @@ def run_fill_check() -> None:
         lines.append(f"| {cand['name']} | {len(f)} | {drop} | {gap_pct:.0%} "
                      f"| {r_model.mean():+.3%} | {r_cons.mean():+.3%} "
                      f"| {slip.mean():+.3%} |")
+        csv_rows.append({"name": cand["name"], "n": len(f),
+                         "model_mean": r_model.mean(), "cons_mean": r_cons.mean(),
+                         "slip_mean": slip.mean()})
 
     drop_pct = n_drop / n_hit if n_hit else 0.0
     gate = cfg.get("ml_metalabel", {}).get("gate", {})
@@ -138,4 +142,9 @@ def run_fill_check() -> None:
                      f"→ **실행 {'가능' if days >= need_days and n_pos >= need_pos else '금지'}**")
     out = RESULTS_DIR / "volbreak_fill_check.md"
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if csv_rows:   # 실전 투입 게이트(config etf_paper.execution_gate)의 판독 소스
+        df_csv = pd.DataFrame(csv_rows)
+        df_csv["minute_days"] = days
+        df_csv.to_csv(RESULTS_DIR / "volbreak_fill_check.csv", index=False,
+                      encoding="utf-8-sig")
     print(f"report: {out}")

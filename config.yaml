@@ -397,6 +397,23 @@ holdout:
   # multiple_testing.declared_trials(144)를 늘리지 않는다. 대신 계열 검정 3건이
   # 수행됐다는 사실을 리포트에 남긴다.
 
+xmarket:
+  # 교차 시장 복제 (2026-08-26 사전 등록 — 전문 PREREG_xmarket.md, 1회 실행).
+  # trend 계열 동결 정의를 미국 지수 ETF 2000~2014(닷컴 붕괴+2008 포함,
+  # 한국 인샘플과 시대 불겹침)에 그대로 적용 — 홀드아웃과 같은 재현 시험이라
+  # declared_trials 에 가산하지 않는다. exit 는 기본형(ma) — 채택 trail 변형은
+  # 한국 후보 선택의 산물이라 배제. 데이터는 미조정 원가격(배당 낙폭이 전략에
+  # 불리한 방향 = 보수적), 비용 0.1% 유지(미국 실제보다 보수적).
+  symbols:
+    SPY: US_SP500
+    QQQ: US_NASDAQ100
+    DIA: US_DOW30
+    IWM: US_RUSSELL2000
+  start: "2000-01-03"
+  end: "2014-12-31"
+  strategies: [breakout, macross, trend_ride]
+  family_t: 1.66            # 계열 풀 단측 t 임계 — holdout trend 규칙과 동일
+
 multiple_testing:
   # 다중검정 보정 (2026-08-14 추가 — 사후 진단 전용, `python -m src.main mtest`).
   # 왜: 누적 144회 탐색을 기록해 놓고 정작 후보 평가에는 반영한 적이 없었다.
@@ -489,6 +506,20 @@ etf_paper:
         n: 300               # 후보별 완결 300건 (약 2.5년)
         t: 1.650             # 단측 alpha=0.05 (df=299, 단일 후보 — 보정 없음)
     per_candidate_min: 20    # [2][3] 후보별 채택/제거 최소 표본 (다후보 계열만)
+  execution_gate:
+    # 실전 투입 게이트 (2026-08-26 등록 — 판정 표본이 쌓이기 전에 동결).
+    # 판정(judgment)은 '신호가 진짜인가'만 답한다. 실전 투입은 추가로 '체결로
+    # 살아남는가'를 요구한다 — 이 기준을 3년 뒤 데이터를 다 본 시점에 만들면
+    # 사후 결정이 되므로 지금 못 박는다. judge 가 상태를 매 실행 표시한다.
+    # 규칙 (판정 통과가 전제 — 게이트는 판정을 대체하지 않는다):
+    # - volbreak (스탑 매수 — 슬리피지 방향이 구조적으로 불리):
+    #   fillcheck 보수 체결 기준 평균 > 0 AND 분봉 표본 min_minute_days 이상.
+    #   (보수 체결 = 최초 도달 5분봉 종가 — 상한 추정이므로 이 게이트는 보수적)
+    # - 그 외 계열 (시가/종가 동시호가 체결 — 슬리피지 대칭):
+    #   preview ok 부분집합(개장 전 인지 = 실거래 가능했던 트레이드) 평균 > 0.
+    #   ok 표본이 판정 표본의 절반 미만이면 '증빙 부족'으로 투입 보류.
+    volbreak: {rule: conservative_fill_positive, min_minute_days: 120}
+    default: {rule: preview_ok_positive, min_ok_ratio: 0.5}
     pooled_checkpoint: 30    # 중간점검 전용 (약 9개월, 08-06 계열 4후보 집계) —
                              # 실거래 근거 아님. 진행 상황 가시화 용도만.
   candidates:

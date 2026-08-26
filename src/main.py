@@ -473,6 +473,33 @@ def cmd_mtest(force: bool) -> None:
     print("report:", RESULTS_DIR / "multiple_testing.md")
 
 
+def cmd_sleeves(force: bool) -> None:
+    from .sleeve_report import run_sleeves
+
+    res = run_sleeves(force)
+    pos = res["positions"]
+    print(f"=== 통합 슬리브 뷰 (측정 전용) — 보유 {len(pos)}건 ===")
+    if not res["dup"].empty:
+        for name in sorted(res["dup"]["name"].unique()):
+            strats = ", ".join(res["dup"][res["dup"]["name"] == name]["strategy"])
+            print(f"  ⚠ 동일 ETF 중복 보유: {name} ({strats}) — 명목 노출 배증")
+    if not res["corr"].empty:
+        print("  슬리브 상관 (비활동=0):")
+        print(res["corr"].round(2).to_string())
+
+
+def cmd_xmarket(force: bool) -> None:
+    from .crossmarket import run_crossmarket
+
+    run_crossmarket(force)
+
+
+def cmd_trade(live_mock: bool, liquidate_legacy: bool) -> None:
+    from .executor import run_trade
+
+    run_trade(live_mock=live_mock, liquidate_legacy=liquidate_legacy)
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -492,10 +519,14 @@ def main() -> None:
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
                                  "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
-                                 "brief", "health", "all"])
+                                 "sleeves", "xmarket", "trade", "brief", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
+    parser.add_argument("--live-mock", action="store_true",
+                        help="trade: KIS 모의계좌에 실제 주문 제출 (기본은 dry-run)")
+    parser.add_argument("--liquidate-legacy", action="store_true",
+                        help="trade: SwingETF 잔여 보유 전량 시장가 청산 (--live-mock 필요)")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -521,6 +552,9 @@ def main() -> None:
         "fillcheck": cmd_fillcheck,
         "mtest": lambda: cmd_mtest(args.force),
         "holdout": lambda: cmd_holdout(args.force),
+        "sleeves": lambda: cmd_sleeves(args.force),
+        "xmarket": lambda: cmd_xmarket(args.force),
+        "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy),
         "brief": cmd_brief,
         "health": cmd_health,
     }

@@ -138,3 +138,84 @@ def run_judge() -> None:
         print(f"  ▶ {'통과 — 실거래 편입 가능' if ok else '기각 — 로테이션 프로그램 종료'}")
     print(f"  (등록 시 명시: 이 검정의 검정력은 인샘플 재현 가정에서도 ~{r2['judgment_power_note']}"
           " — 표본 제약의 정직한 귀결이며, 낮다고 부호 규칙으로 바꾸면 α=50% 동전던지기가 된다)")
+
+    _regime_composition(cfg, led)
+    _execution_gate_status(cfg, led)
+
+
+def _regime_composition(cfg: dict, led: pd.DataFrame) -> None:
+    """판정 표본의 레짐 구성 병기 (2026-08-26 추가 — 측정·표시 전용, 기준 불변).
+
+    지금 쌓이는 포워드 표본은 2026 폭락기에 편중된다. 판정 결과가 '어느 레짐의
+    성과였나'를 해석할 수 있도록, 진입일에 해당 ETF가 폭락 구간(60일 고점 대비
+    -10% 이하 — crash_study 검출 기준)이었던 비율을 계열별로 찍는다.
+    """
+    if led.empty:
+        return
+    from .data_loader import load_symbol
+
+    code_of = {(c["name"], c["strategy"]): str(c["code"])
+               for c in cfg["etf_paper"]["candidates"]}
+    print("=== 판정 표본 레짐 구성 (측정 전용 — 진입일 기준 폭락 구간 비율) ===")
+    fam_stats: dict[str, list[bool]] = {}
+    for (name, strat), code in code_of.items():
+        sub = led[(led["name"] == name) & (led["strategy"] == strat)]
+        if sub.empty:
+            continue
+        px = load_symbol(code, "kr")["Close"]
+        crash = (px / px.rolling(60).max() - 1) <= -0.10
+        flags = [bool(crash.asof(d)) for d in pd.to_datetime(sub["entry_date"])]
+        fam = next((c.get("family", "trend") for c in cfg["etf_paper"]["candidates"]
+                    if c["name"] == name and c["strategy"] == strat), "trend")
+        fam_stats.setdefault(fam, []).extend(flags)
+    for fam, flags in sorted(fam_stats.items()):
+        pct = sum(flags) / len(flags)
+        print(f"  [{fam:9s}] 표본 {len(flags):3d}건 중 폭락 구간 진입 {pct:.0%} — "
+              "판정 도달 시 이 비율을 해석에 병기할 것")
+    print()
+
+
+def _execution_gate_status(cfg: dict, led: pd.DataFrame) -> None:
+    """실전 투입 게이트 상태 표시 (config etf_paper.execution_gate — 2026-08-26 동결).
+
+    판정 통과가 전제인 2차 관문 — 여기서는 상태만 표시한다 (판정을 대체하지 않음).
+    """
+    gate = cfg["etf_paper"].get("execution_gate")
+    if not gate:
+        return
+    print("=== 실전 투입 게이트 (판정 통과 후 2차 관문 — config 동결, 상태 표시만) ===")
+    fill_path = RESULTS_DIR / "volbreak_fill_check.csv"
+    fills = (pd.read_csv(fill_path).set_index("name")
+             if fill_path.exists() else pd.DataFrame())
+    for cand in cfg["etf_paper"]["candidates"]:
+        name, strat = cand["name"], cand["strategy"]
+        label = f"{name} {strat}"
+        if strat == "volbreak":
+            g = gate["volbreak"]
+            if fills.empty or name not in fills.index:
+                print(f"  {label:34s} fillcheck 표본 없음 — `fillcheck` 실행 필요")
+                continue
+            row = fills.loc[name]
+            days_ok = int(row["minute_days"]) >= int(g["min_minute_days"])
+            pos_ok = float(row["cons_mean"]) > 0
+            state = ("충족" if days_ok and pos_ok else
+                     f"미충족 (분봉 {int(row['minute_days'])}/{g['min_minute_days']}일, "
+                     f"보수 평균 {row['cons_mean']:+.3%})")
+            print(f"  {label:34s} 보수 체결 평균 {row['cons_mean']:+.3%} → {state}")
+        else:
+            g = gate["default"]
+            sub = led[(led["name"] == name) & (led["strategy"] == strat)] \
+                if len(led) else led
+            ok_sub = sub[sub["preview"] == "ok"] if len(sub) else sub
+            if not len(sub):
+                print(f"  {label:34s} 표본 0건 — 대기")
+                continue
+            ratio = len(ok_sub) / len(sub)
+            if ratio < float(g["min_ok_ratio"]):
+                print(f"  {label:34s} ok 증빙 {len(ok_sub)}/{len(sub)}건 "
+                      f"({ratio:.0%} < {g['min_ok_ratio']:.0%}) — 증빙 부족")
+            else:
+                m = float(ok_sub["net_ret"].mean())
+                print(f"  {label:34s} ok 부분집합 평균 {m:+.3%} "
+                      f"({len(ok_sub)}건) → {'충족' if m > 0 else '미충족'}")
+    print("  (판정 통과 + 게이트 충족인 후보만 실전 투입 — 어느 한쪽도 대체 불가)")

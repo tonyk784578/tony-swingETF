@@ -30,14 +30,14 @@ case "${1:-evening}" in
       git -C "$ROOT" add paper/ >/dev/null 2>&1 || true
       git -C "$ROOT" commit -q -m "장부 스냅샷 $(date +%F) (자동)" -- paper/ \
         >/dev/null 2>&1 || true
-      # 주간 오프사이트 백업 (금요일) — 디스크 사고 시 마지막 push 이후 기록이
-      # 사라지므로. 실패는 삼키되 로그에 남긴다 (health의 커밋 나이 감시와 별개)
-      if [ "$(date +%u)" = "5" ]; then
-        if git -C "$ROOT" push >/dev/null 2>&1; then
-          echo "weekly push: ok"
-        else
-          echo "[WARN] weekly push failed — 수동 push 필요"
-        fi
+      # 일일 오프사이트 백업 (2026-08-26 주간→일일 개정) — preview_signals·
+      # market_snapshots 는 소급 불가 자산이라, 주간 push 는 기기 사고 시 최대
+      # 1주치를 잃는다. 매일 push 로 노출 창을 하루로 줄인다.
+      # 실패는 삼키되 로그에 남긴다 (health의 커밋 나이 감시와 별개)
+      if git -C "$ROOT" push >/dev/null 2>&1; then
+        echo "daily push: ok"
+      else
+        echo "[WARN] daily push failed — 수동 push 필요"
       fi
     } >>"$LOG" 2>&1
     ;;

@@ -105,6 +105,16 @@ def write_status(mode: str, force: bool = False, notify: bool = False) -> None:
         held = (", ".join(f"{p['name']}({p['unrealized']:+.1%})"
                           for p in rot["open_pos"]) or "전 슬롯 현금")
         lines.append(f"| (로테이션) | rotation2 | 보유 {held} |")
+    # 동일 ETF 를 여러 전략이 같은 밤 보유하면 명목 노출이 배증 — 실전 투입 시
+    # 노출 합산 캡 대상 (통합 슬리브 뷰 `sleeves` 의 요약을 매일 노출)
+    held_by = {}
+    for st in states:
+        if st["open_pos"]:
+            held_by.setdefault(st["cand"]["name"], []).append(st["cand"]["strategy"])
+    dups = {n: s for n, s in held_by.items() if len(s) > 1}
+    for name, strats in sorted(dups.items()):
+        lines.append(f"\n**⚠ 동일 ETF 중복 보유**: {name} ({', '.join(strats)}) — "
+                     "같은 밤 명목 노출 배증 (실전 시 합산 캡 대상)")
 
     lines.append("\n## 판정 진행 (도달 시 데스크톱 알림)")
     lines.append("")
