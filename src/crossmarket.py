@@ -45,6 +45,122 @@ def load_xmarket_symbol(sym: str, force: bool = False) -> pd.DataFrame:
     return df
 
 
+def load_xmarket_vb_symbol(sym: str, force: bool = False) -> pd.DataFrame:
+    """volbreak 복제용 전 기간(1999~실행일) 캐시 — trend 시험 캐시와 분리 보관.
+
+    기존 xmarket_{sym}.parquet 은 2026-08-26 trend 1회 시험의 재현 자산이라
+    불변으로 두고, 이쪽은 자체 캐시를 쓴다 (PREREG_xmarket2.md).
+    """
+    from .data_loader import confirmed_cutoff
+
+    path = DATA_DIR / f"xmarket_vb_{sym}.parquet"
+    if path.exists() and not force:
+        return pd.read_parquet(path)
+
+    import yfinance as yf
+
+    y = yf.Ticker(sym).history(start="1999-01-01", auto_adjust=False)
+    if y.empty:
+        return pd.DataFrame()
+    y.index = pd.to_datetime(y.index.date)
+    df = y[["Open", "High", "Low", "Close", "Volume"]].dropna()
+    df = df[df.index <= confirmed_cutoff()]
+    df.index.name = "Date"
+    if not df.empty:
+        df.to_parquet(path)
+    return df
+
+
+def run_crossmarket_volbreak(force: bool = False) -> dict:
+    """volbreak 동결 규칙의 미국 시장 재현 (사전 등록 2026-08-26 — 창별 1회)."""
+    from .etf_swing import simulate_volbreak
+
+    cfg = load_config()
+    vcfg = cfg["xmarket_volbreak"]
+    k = cfg["etf"]["strategies"]["volbreak"]["k"]
+    cost = cfg["etf"]["cost_round_trip"]
+    crit = float(vcfg["family_t"])
+    data = {sym: load_xmarket_vb_symbol(sym, force)
+            for sym in cfg["xmarket"]["symbols"]}
+
+    verdicts, detail = [], []
+    for wname, w in vcfg["windows"].items():
+        start = pd.Timestamp(w["start"])
+        end = pd.Timestamp(w["end"]) if w["end"] else pd.Timestamp.max
+        trades = []
+        for sym, df in data.items():
+            if df.empty:
+                continue
+            sub = df[(df.index >= start) & (df.index <= end)]
+            if len(sub) < 250:
+                continue
+            t = simulate_volbreak(sub, k, cost)
+            if t.empty:
+                continue
+            st = combo_stats(t["net_ret"])
+            detail.append({"window": wname, "sym": sym, "n": st["n"],
+                           "mean": st["mean"], "win": st["win_rate"],
+                           "mdd": st["mdd"], "t_stat": st["t_stat"]})
+            trades.append(t)
+        pooled = (pd.concat(trades, ignore_index=True)
+                  .groupby("exit_date")["net_ret"].mean()
+                  if trades else pd.Series(dtype=float))
+        t_val = one_sided_t(pooled)
+        mean = float(pooled.mean()) if len(pooled) else float("nan")
+        if not len(pooled):
+            outcome = "표본 없음"
+        elif mean > 0 and t_val >= crit:
+            outcome = "통과 — 재현됨"
+        elif mean > 0:
+            outcome = "미달 — 판별 불가"
+        else:
+            outcome = "실패 — 재현 안 됨"
+        verdicts.append({"window": wname, "n_days": len(pooled), "mean": mean,
+                         "t": t_val, "outcome": outcome})
+
+    res = {"verdicts": pd.DataFrame(verdicts), "detail": pd.DataFrame(detail),
+           "crit": crit}
+    _write_vb_report(res, vcfg)
+    print("=== volbreak 교차 시장 복제 (일 단위 풀, 창별 1회) ===")
+    for _, v in res["verdicts"].iterrows():
+        print(f"  [{v['window']}] {v['n_days']}일, 평균 {v['mean']:+.3%}, "
+              f"단측 t={v['t']:.2f} (임계 {crit}) → {v['outcome']}")
+    return res
+
+
+def _write_vb_report(res: dict, vcfg: dict) -> None:
+    lines = [f"""# volbreak 교차 시장 복제 — 미국 지수 ETF (1회)
+
+생성일: {pd.Timestamp.today().date()} | 사전 등록: PREREG_xmarket2.md
+(결과 관측 전 확정) | 동결 엔진 simulate_volbreak (k=0.5, 비용 0.1%)
+
+## 창별 판정 (일 단위 풀 — 동시 트리거 상관 제거)
+
+| 창 | 관측일 | 평균 | 단측 t | 임계 | 결론 |
+|---|---|---|---|---|---|"""]
+    for _, v in res["verdicts"].iterrows():
+        lines.append(f"| {v['window']} | {v['n_days']} | {v['mean']:+.3%} "
+                     f"| **{v['t']:.2f}** | {res['crit']} | {v['outcome']} |")
+    lines.append("""
+- era_independent(2000~2014)가 주 시험 — 시대·시장 모두 독립 (닷컴+2008).
+- market_independent(2015~)는 한국 인샘플과 같은 시대라 독립성이 약함 —
+  단독 통과는 약한 증거 (등록 시 명시).
+
+## 상품별 상세 (진단용)
+
+| 창 | ETF | N | 평균 | 승률 | MDD | t |
+|---|---|---|---|---|---|---|""")
+    for _, d in res["detail"].iterrows():
+        lines.append(f"| {d['window']} | {d['sym']} | {d['n']} | {d['mean']:+.3%} "
+                     f"| {d['win']:.1%} | {d['mdd']:.1%} | {d['t_stat']:.2f} |")
+    lines.append("""
+어느 결과든 판정 기준·표본(300건)·실전 금지 시점은 불변 — 이 시험은 확신을
+바꾸지 실행을 앞당기지 않는다 (PREMORTEM S2). declared_trials 불가산. 1회 실행.""")
+    out = RESULTS_DIR / "xmarket_volbreak.md"
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"report: {out}", file=sys.stderr)
+
+
 def run_crossmarket(force: bool = False) -> dict:
     cfg = load_config()
     xcfg = cfg["xmarket"]

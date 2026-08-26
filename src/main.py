@@ -504,9 +504,10 @@ def cmd_sleeves(force: bool) -> None:
 
 
 def cmd_xmarket(force: bool) -> None:
-    from .crossmarket import run_crossmarket
+    from .crossmarket import run_crossmarket, run_crossmarket_volbreak
 
-    run_crossmarket(force)
+    run_crossmarket(force)          # trend 1회 시험 재현 (2026-08-26 완료분)
+    run_crossmarket_volbreak(force)  # volbreak 복제 (PREREG_xmarket2)
 
 
 def cmd_trade(live_mock: bool, liquidate_legacy: bool, auto: bool = False) -> None:

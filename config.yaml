@@ -421,6 +421,16 @@ xmarket:
   strategies: [breakout, macross, trend_ride]
   family_t: 1.66            # 계열 풀 단측 t 임계 — holdout trend 규칙과 동일
 
+xmarket_volbreak:
+  # volbreak 교차 시장 복제 (2026-08-26 사전 등록 — 전문 PREREG_xmarket2.md).
+  # 동결 엔진(simulate_volbreak, k=0.5)·xmarket 4종 재사용, 창 2개 각각 판정
+  # (a: 시대·시장 독립 2000~2014 / b: 시장만 독립 2015~ — b 단독 통과는 약한
+  # 증거로 해석). 일 단위 풀링(동시 트리거 상관 제거), declared_trials 불가산.
+  windows:
+    era_independent: {start: "2000-01-03", end: "2014-12-31"}
+    market_independent: {start: "2015-01-01", end: null}   # null = 실행일 확정봉
+  family_t: 1.66            # 창별 단측 t 임계 (일 단위 풀 — holdout 관례)
+
 multiple_testing:
   # 다중검정 보정 (2026-08-14 추가 — 사후 진단 전용, `python -m src.main mtest`).
   # 왜: 누적 144회 탐색을 기록해 놓고 정작 후보 평가에는 반영한 적이 없었다.
