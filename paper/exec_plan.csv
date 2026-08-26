@@ -1,0 +1,41 @@
+﻿date,generated_at,mode,action,code,name,strategy,qty,note,order_no
+2026-08-26,2026-08-26 11:13:32,dry_run,plan_only,091180,KODEX_Auto,volbreak,0,스탑매수 시가+580원 (KIS 조건부 주문 미지원 — 표시만),
+2026-08-26,2026-08-26 11:13:32,dry_run,plan_only,305720,KODEX_Battery,volbreak,0,스탑매수 시가+322원 (KIS 조건부 주문 미지원 — 표시만),
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,069500,KODEX 200,-,2,SwingETF 잔여 청산,23829.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,091160,KODEX 반도체,-,2,SwingETF 잔여 청산,23834.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,091170,KODEX 은행,-,17,SwingETF 잔여 청산,23840.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,091180,KODEX 자동차,-,8,SwingETF 잔여 청산,23845.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,102110,TIGER 200,-,2,SwingETF 잔여 청산,23850.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,102970,KODEX 증권,-,12,SwingETF 잔여 청산,23852.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,114260,KODEX 국고채3년,-,8,SwingETF 잔여 청산,23855.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,117700,KODEX 건설,-,43,SwingETF 잔여 청산,23859.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,132030,KODEX 골드선물(H),-,20,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,133690,TIGER 미국나스닥100,-,1,SwingETF 잔여 청산,23870.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,139260,TIGER 200 IT,-,1,SwingETF 잔여 청산,23873.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,139660,KIWOOM 미국달러선물인버스,-,34,SwingETF 잔여 청산,23882.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,143850,TIGER 미국S&P500선물(H),-,3,SwingETF 잔여 청산,23885.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,148070,KIWOOM 국고채10년,-,4,SwingETF 잔여 청산,23889.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,153130,KODEX 단기채권,-,5,SwingETF 잔여 청산,23895.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,157490,TIGER 소프트웨어,-,31,SwingETF 잔여 청산,23905.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,229200,KODEX 코스닥150,-,19,SwingETF 잔여 청산,23913.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,244580,KODEX 바이오,-,10,SwingETF 잔여 청산,23926.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,261240,KODEX 미국달러선물,-,31,SwingETF 잔여 청산,23937.0
+2026-08-26,2026-08-26 11:21:37,live_mock,liquidate_legacy,305080,TIGER 미국채10년선물,-,36,SwingETF 잔여 청산,23942.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,132030,KODEX 골드선물(H),-,20,SwingETF 잔여 청산,24340.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,139660,KIWOOM 미국달러선물인버스,-,34,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,143850,TIGER 미국S&P500선물(H),-,3,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,305720,KODEX 2차전지산업,-,20,SwingETF 잔여 청산,24354.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,329750,TIGER 미국달러단기채권액티브,-,36,SwingETF 잔여 청산,24357.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,360750,TIGER 미국S&P500,-,18,SwingETF 잔여 청산,24363.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,379800,KODEX 미국S&P500,-,20,SwingETF 잔여 청산,24368.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,379810,KODEX 미국나스닥100,-,18,SwingETF 잔여 청산,24373.0
+2026-08-26,2026-08-26 11:28:08,live_mock,liquidate_legacy,411060,ACE KRX금현물,-,40,SwingETF 잔여 청산,24387.0
+2026-08-26,2026-08-26 11:29:39,live_mock,liquidate_legacy,139660,KIWOOM 미국달러선물인버스,-,34,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:29:39,live_mock,liquidate_legacy,143850,TIGER 미국S&P500선물(H),-,3,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:29:39,live_mock,liquidate_legacy,329750,TIGER 미국달러단기채권액티브,-,36,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:32:07,live_mock,liquidate_legacy,139660,KIWOOM 미국달러선물인버스,-,34,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:32:07,live_mock,liquidate_legacy,143850,TIGER 미국S&P500선물(H),-,3,SwingETF 잔여 청산,
+2026-08-26,2026-08-26 11:40:44,dry_run,plan_only,091180,KODEX_Auto,volbreak,0,스탑매수 시가+580원 (KIS 조건부 주문 미지원 — 표시만),
+2026-08-26,2026-08-26 11:40:44,dry_run,plan_only,305720,KODEX_Battery,volbreak,0,스탑매수 시가+322원 (KIS 조건부 주문 미지원 — 표시만),
+2026-08-26,2026-08-26 13:56:20,dry_run,plan_only,091180,KODEX_Auto,volbreak,0,스탑매수 시가+580원 (KIS 조건부 주문 미지원 — 표시만),
+2026-08-26,2026-08-26 13:56:20,dry_run,plan_only,305720,KODEX_Battery,volbreak,0,스탑매수 시가+322원 (KIS 조건부 주문 미지원 — 표시만),
