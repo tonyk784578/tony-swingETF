@@ -17,6 +17,7 @@ from .etf_swing import (
     iter_candidates,
     raw_entry_signal,
     simulate,
+    simulate_overnight,
     simulate_volbreak,
     volbreak_trigger,
 )
@@ -125,6 +126,10 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
         if cand["strategy"] == "volbreak":
             trades, open_pos = simulate_volbreak(
                 df, cfg["etf"]["strategies"]["volbreak"]["k"], cost, return_open=True)
+        elif cand["strategy"] == "overnight":
+            trades, open_pos = simulate_overnight(
+                df, cfg["etf"]["strategies"]["overnight"]["entry_above"], cost,
+                return_open=True)
         else:
             trades, open_pos = simulate(df, entry, exit_, max_hold, cost,
                                         return_open=True, trailing=trailing)
@@ -232,8 +237,9 @@ def candidate_states(force: bool = False) -> list[dict]:
             # 일반 분기(raw 마지막 값)는 '마지막 봉이 월초였나'라 하루 어긋난다
             today, last = pd.Timestamp.today(), df.index[-1]
             enter_today = bool((today.year, today.month) != (last.year, last.month))
-        elif cand["strategy"] == "volbreak":
-            # 매일 조건부 대기 — 트리거(시가+증분)는 개장 전 확정, 스탑 주문 가능
+        elif cand["strategy"] in ("volbreak", "overnight"):
+            # 매일 조건부 대기 — volbreak은 스탑 매수(트리거 개장 전 확정),
+            # overnight는 장 마감 무렵 양봉 확인 후 종가 매수 (15:20 근사)
             enter_today = True
         else:
             # 마지막 확정 봉의 raw 신호 = '다음 개장(오늘) 진입' — 백테스트와 동일 함수
@@ -247,6 +253,11 @@ def candidate_states(force: bool = False) -> list[dict]:
             _, open_pos = simulate_volbreak(df, k, cfg["etf"]["cost_round_trip"],
                                             return_open=True)
             state["trigger_inc"] = volbreak_trigger(df, k)
+        elif cand["strategy"] == "overnight":
+            _, open_pos = simulate_overnight(
+                df, cfg["etf"]["strategies"]["overnight"]["entry_above"],
+                cfg["etf"]["cost_round_trip"], return_open=True)
+            state["close_entry"] = True   # 종가 조건부 매수 안내 표시용
         else:
             _, open_pos = simulate(df, entry, exit_, max_hold,
                                    cfg["etf"]["cost_round_trip"],
@@ -292,6 +303,8 @@ def _state_text(st: dict) -> str:
     if "trigger_inc" in st:   # volbreak — 조건부 스탑 매수 (도달 시에만 체결)
         return (f"스탑매수 대기: 시가 + {st['trigger_inc']:,.0f}원 도달 시 체결 "
                 "(내일 시가 청산)")
+    if st.get("close_entry"):   # overnight — 장 마감 무렵 양봉 확인 후 종가 매수
+        return "종가매수 대기: 오늘 장중 양봉(종가>시가)이면 종가 매수 (내일 시가 청산)"
     return "오늘 시가 진입 대기" if st["enter_today"] else "무포지션 · 신호 없음"
 
 

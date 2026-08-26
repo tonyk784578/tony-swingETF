@@ -30,7 +30,7 @@ import pandas as pd
 
 from .config import RESULTS_DIR, load_config
 from .data_loader import confirmed_cutoff
-from .etf_swing import iter_candidates, simulate, simulate_volbreak
+from .etf_swing import iter_candidates, simulate, simulate_overnight, simulate_volbreak
 
 
 def corwin_schultz(df: pd.DataFrame, window_days: int) -> float:
@@ -148,6 +148,9 @@ def run_costs() -> None:
         for c in (cost_flat, c_est):
             if cand["strategy"] == "volbreak":
                 t = simulate_volbreak(df, k_vb, c)
+            elif cand["strategy"] == "overnight":
+                t = simulate_overnight(
+                    df, cfg["etf"]["strategies"]["overnight"]["entry_above"], c)
             else:
                 t = simulate(df, entry, exit_, mh, c, trailing=tr)
             r = t["net_ret"]

@@ -30,9 +30,9 @@ def _candidate_trades(force: bool = False) -> tuple[list[dict], pd.DatetimeIndex
     calendar: set = set()
     for cand, df, entry, exit_, max_hold, trailing in iter_candidates(
             force, cutoff=confirmed_cutoff()):
-        if cand["strategy"] == "volbreak":
+        if cand["strategy"] in ("volbreak", "overnight"):
             # 1일 회전 별도 슬리브 — 스윙 포트폴리오 시뮬 미편입 (rotation2 선례).
-            # 장중 체결·익일 시가 청산이라 이 시뮬의 일별 수익 분해와 맞지 않는다.
+            # 장중/종가 체결·익일 시가 청산이라 이 시뮬의 일별 수익 분해와 맞지 않는다.
             continue
         code = str(cand["code"])
         calendar.update(df.index)

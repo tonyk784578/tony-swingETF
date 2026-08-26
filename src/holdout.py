@@ -32,7 +32,7 @@ import pandas as pd
 
 from .backtest import combo_stats
 from .config import DATA_DIR, RESULTS_DIR, load_config
-from .etf_swing import candidate_flags, simulate, simulate_volbreak
+from .etf_swing import candidate_flags, simulate, simulate_overnight, simulate_volbreak
 
 # us_dip / ewy_* 는 미국 일봉 매핑이 필요하다. 등록 후보에는 없지만, 나중에
 # 그런 후보가 추가된 채로 이 단계를 돌리면 조용히 빈 신호가 되므로 막는다.
@@ -96,6 +96,9 @@ def candidate_trades(cand: dict, df: pd.DataFrame, cost: float) -> pd.DataFrame:
     if strategy == "volbreak":
         k = load_config()["etf"]["strategies"]["volbreak"]["k"]
         return simulate_volbreak(df, k, cost)
+    if strategy == "overnight":
+        p = load_config()["etf"]["strategies"]["overnight"]
+        return simulate_overnight(df, p["entry_above"], cost)
     # 가격 전략은 us 매핑을 참조하지 않는다 (_NEEDS_US 가드로 보장)
     empty = pd.Series(np.nan, index=df.index)
     entry, exit_, max_hold, trailing = candidate_flags(cand, df, empty)
@@ -137,6 +140,12 @@ def run_holdout(force: bool = False) -> dict:
         code, name = str(cand["code"]), cand["name"]
         strategy = cand["strategy"]
         fam = cand.get("family", "trend")
+        if fam not in hcfg["families"]:
+            # 홀드아웃 등록(08-14) 이후 편입된 계열 — 여기 넣으면 동결된 1회
+            # 시험의 재현이 깨진다. 신규 계열의 홀드아웃 확인은 자기 등록 절차가
+            # 담당한다 (예: overnight — overnight_check, PREREG_overnight.md)
+            skipped.append((f"{name} {strategy}", "홀드아웃 등록 후 편입 계열 — 대상 외"))
+            continue
         df = load_holdout_symbol(code, force)
         if df.empty or len(df) < 120:      # 워밍업(MA60·20일 신고가)도 못 채우는 표본
             skipped.append((f"{name} {strategy}", f"구간 데이터 {len(df)}일"))

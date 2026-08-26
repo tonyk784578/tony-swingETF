@@ -28,9 +28,9 @@ def order_plan(states: list[dict], capital: float, exposure: float,
     for st in states:
         if not st["enter_today"] or st["open_pos"]:
             continue
-        if "trigger_inc" in st:
-            # volbreak — 포트폴리오 규칙 기반 환산 대상 아님 (별도 슬리브).
-            # 스탑 주문 정보는 포지션 섹션의 상태 텍스트가 담당
+        if "trigger_inc" in st or st.get("close_entry"):
+            # volbreak/overnight — 포트폴리오 규칙 기반 환산 대상 아님 (별도
+            # 슬리브, 1일 회전). 조건부 주문 정보는 상태 텍스트·전용 섹션이 담당
             continue
         lev = leverage.get(str(st["cand"]["code"]), 1)
         amount = capital * exposure / 3 / lev
@@ -87,6 +87,13 @@ def write_status(mode: str, force: bool = False, notify: bool = False) -> None:
         for st in stops:
             lines.append(f"| {st['cand']['name']} | 시가 + {st['trigger_inc']:,.0f}원 "
                          f"도달 시 | {st['last_close']:,.0f} | 내일 시가 |")
+
+    closes = [st for st in states if st.get("close_entry") and not st["open_pos"]]
+    if closes:
+        names = ", ".join(st["cand"]["name"] for st in closes)
+        lines.append("\n### 오버나이트 — 장 마감 무렵(15:20) 확인 (별도 슬리브, 섀도)")
+        lines.append(f"\n- {names}: 오늘 장중 양봉(현재가>시가)이면 **종가(동시호가) "
+                     "매수 → 내일 시가 매도**")
 
     lines.append("\n## 포지션 (Stage 2 섀도)")
     lines.append("\n| 후보 | 전략 | 상태 |")

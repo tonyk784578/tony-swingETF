@@ -225,8 +225,8 @@ def iter_candidates(force: bool = False, cutoff: pd.Timestamp | None = None,
         df = load_symbol(str(cand["code"]), "kr", force)
         if cutoff is not None:
             df = df[df.index <= cutoff]
-        if cand["strategy"] == "volbreak":
-            # 장중 체결 모형 — 플래그 방식 밖. 소비자는 simulate_volbreak로 분기
+        if cand["strategy"] in ("volbreak", "overnight"):
+            # 장중/종가 체결 모형 — 플래그 방식 밖. 소비자는 전용 엔진으로 분기
             yield cand, df, None, None, None, None
             continue
         us_mapped = map_us_to_kr(us_returns(nasdaq), df.index, "ixic")["ixic"]
@@ -365,7 +365,9 @@ _STRATEGY_STATUS = {
     "volbreak":   "6/12 통과 — Stage 2 섀도 (후보별 Bonferroni 판정, 후반 감쇠 주의)",
     "ewy_up1":    "종결 — 기각 (0/2). 야간 정보는 시가에 이미 반영",
     "ewy_up2":    "종결 — 기각 (0/2). us_dip과 함께 '미국 신호→ETF 시가' 계열 완전 종결",
-    "overnight":  "2026-08-26 사전 등록 (PREREG_overnight.md) — 1회 시험",
+    "overnight":  "1/12 통과 (KODEX_Semicon, 홀드아웃 양수 재현) — Stage 2 섀도. "
+                  "주의: 계열 풀은 음수(일단위 t=-3.31) — 광범위 야간 프리미엄 기각, "
+                  "volbreak과 같은 리스크 그룹(ρ=0.54)",
 }
 
 
