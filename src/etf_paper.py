@@ -22,8 +22,14 @@ from .etf_swing import (
     volbreak_trigger,
 )
 
-LEDGER_COLS = ["entry_date", "exit_date", "name", "strategy", "hold", "net_ret",
+LEDGER_COLS = ["entry_date", "exit_date", "code", "name", "strategy", "family",
+               "hold", "entry_price", "exit_price", "gross_ret", "cost", "net_ret",
                "preview"]
+# 2026-08-26 스키마 확장: code/family/체결가/비용 분해 추가 (정밀 조회용).
+# 리플레이는 결정적이므로 과거 행의 파생 컬럼 소급 채움은 기록 훼손이 아니다 —
+# 기존 값(net_ret·hold·preview·날짜)은 어떤 경우에도 다시 쓰지 않는다.
+# gross_ret = net_ret + cost (비용 차감 전), cost = 기록 당시 왕복 가정(0.1%).
+# rotation2 는 에피소드 구조라 체결가 미보유 — 해당 컬럼 NaN 유지.
 
 # preview 컬럼 — 섀도와 실거래의 구조적 괴리 진단용 (2026-08-07 추가):
 #   ok   = 진입일 아침 개장(09:00) 전 프리뷰가 신호를 표시 → 실거래 가능했던 트레이드
@@ -49,10 +55,14 @@ def _preview_log_path():
 def load_etf_ledger() -> pd.DataFrame:
     path = _ledger_path()
     if path.exists():
-        led = pd.read_csv(path, parse_dates=["entry_date", "exit_date"])
+        led = pd.read_csv(path, parse_dates=["entry_date", "exit_date"],
+                          dtype={"code": str})
         if "preview" not in led.columns:   # 구버전 장부 호환
             led["preview"] = "none"
-        return led
+        for col in LEDGER_COLS:            # 2026-08-26 확장 컬럼 호환
+            if col not in led.columns:
+                led[col] = "" if col in ("code", "family") else float("nan")
+        return led[LEDGER_COLS]
     return pd.DataFrame(columns=LEDGER_COLS)
 
 
@@ -119,6 +129,7 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
 
     new_rows = []
     status = []
+    enriched = 0
     for cand, df, entry, exit_, max_hold, trailing in _candidate_frames(force):
         # 후보별 freeze — 나중에 등록된 후보(예: trend_ride 2026-08-07)는 자기
         # 등록일 이후만 아웃오브샘플. 기존 후보의 freeze는 건드리지 않는다.
@@ -148,10 +159,37 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
             if t["entry_date"] in done:
                 continue
             new_rows.append({"entry_date": t["entry_date"], "exit_date": t["exit_date"],
-                             "name": cand["name"], "strategy": cand["strategy"],
-                             "hold": t["hold"], "net_ret": round(t["net_ret"], 6),
+                             "code": str(cand["code"]), "name": cand["name"],
+                             "strategy": cand["strategy"],
+                             "family": cand.get("family", "trend"),
+                             "hold": t["hold"],
+                             "entry_price": round(float(t["entry_price"]), 4),
+                             "exit_price": round(float(t["exit_price"]), 4),
+                             "gross_ret": round(t["net_ret"] + cost, 6), "cost": cost,
+                             "net_ret": round(t["net_ret"], 6),
                              "preview": _preview_flag(t["entry_date"], cand["name"],
                                                       cand["strategy"], snap, deadline)})
+        # 확장 컬럼 소급 채움 — 리플레이는 결정적이라 파생 컬럼(체결가·비용 분해)
+        # 을 과거 행에 채워도 기록 훼손이 아니다. 기존 값은 다시 쓰지 않는다.
+        if len(ledger) and len(trades):
+            mask = ((ledger["name"] == cand["name"])
+                    & (ledger["strategy"] == cand["strategy"])
+                    & ledger["entry_price"].isna())
+            if mask.any():
+                tmap = trades.drop_duplicates("entry_date").set_index("entry_date")
+                for idx in ledger.index[mask]:
+                    ed = ledger.at[idx, "entry_date"]
+                    if ed not in tmap.index:
+                        continue
+                    row = tmap.loc[ed]
+                    ledger.loc[idx, ["code", "family"]] = [str(cand["code"]),
+                                                           cand.get("family", "trend")]
+                    ledger.loc[idx, ["entry_price", "exit_price", "cost"]] = [
+                        round(float(row["entry_price"]), 4),
+                        round(float(row["exit_price"]), 4), cost]
+                    ledger.at[idx, "gross_ret"] = round(
+                        float(ledger.at[idx, "net_ret"]) + cost, 6)
+                    enriched += 1
         status.append({"name": cand["name"], "strategy": cand["strategy"],
                        "insample_mean": insample["mean"] if insample else float("nan"),
                        "open_pos": open_pos})
@@ -161,7 +199,8 @@ def update_etf_ledger(force: bool = False) -> tuple[pd.DataFrame, int, list[dict
     if new_rows:
         ledger = pd.concat([ledger, pd.DataFrame(new_rows)], ignore_index=True)
         ledger = ledger.sort_values(["entry_date", "name"]).reset_index(drop=True)
-        ledger.to_csv(_ledger_path(), index=False, encoding="utf-8-sig")
+    if new_rows or enriched:
+        ledger[LEDGER_COLS].to_csv(_ledger_path(), index=False, encoding="utf-8-sig")
     return ledger, len(new_rows), status
 
 
@@ -183,8 +222,11 @@ def _rotation2_rows(cfg: dict, ledger: pd.DataFrame, new_rows: list,
         if (t["name"], t["entry_date"]) in done:
             continue
         new_rows.append({"entry_date": t["entry_date"], "exit_date": t["exit_date"],
-                         "name": t["name"], "strategy": "rotation2",
-                         "hold": t["hold"], "net_ret": round(t["net_ret"], 6),
+                         "code": "", "name": t["name"], "strategy": "rotation2",
+                         "family": "rotation2", "hold": t["hold"],
+                         "entry_price": float("nan"), "exit_price": float("nan"),
+                         "gross_ret": float("nan"), "cost": float("nan"),
+                         "net_ret": round(t["net_ret"], 6),
                          "preview": "none"})   # 월초 리밸런스는 전월 말에 예고 — 대상 외
     pos_text = (", ".join(f"{p['name']}({p['unrealized']:+.1%})" for p in open_pos)
                 if open_pos else "전 슬롯 현금")

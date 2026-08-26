@@ -58,6 +58,8 @@ def simulate(df: pd.DataFrame, entry_flag: pd.Series, exit_flag: pd.Series,
                 trades.append({
                     "entry_date": df.index[pos_i], "exit_date": df.index[i], "hold": held,
                     "net_ret": df["Close"].iloc[i] / entry_price - 1 - cost,
+                    "entry_price": float(entry_price),
+                    "exit_price": float(df["Close"].iloc[i]),
                 })
                 pos_i = None
     result = pd.DataFrame(trades)
@@ -90,6 +92,8 @@ def simulate_volbreak(df: pd.DataFrame, k: float, cost: float,
             trades.append({
                 "entry_date": df.index[i], "exit_date": df.index[i + 1], "hold": 1,
                 "net_ret": df["Open"].iloc[i + 1] / fill - 1 - cost,
+                "entry_price": float(fill),
+                "exit_price": float(df["Open"].iloc[i + 1]),
             })
     result = pd.DataFrame(trades)
     if not return_open:
@@ -127,6 +131,8 @@ def simulate_overnight(df: pd.DataFrame, entry_above: float, cost: float,
             trades.append({
                 "entry_date": df.index[i], "exit_date": df.index[i + 1], "hold": 1,
                 "net_ret": df["Open"].iloc[i + 1] / df["Close"].iloc[i] - 1 - cost,
+                "entry_price": float(df["Close"].iloc[i]),
+                "exit_price": float(df["Open"].iloc[i + 1]),
             })
     result = pd.DataFrame(trades)
     if not return_open:

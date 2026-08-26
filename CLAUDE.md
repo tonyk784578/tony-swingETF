@@ -89,6 +89,7 @@ python -m src.main rotation        # 로테이션 실험1(기각) 재현 + 실�
 python -m src.main sleeves         # 통합 슬리브 리스크 뷰 (중복 보유·슬리브 상관 — 측정만)
 python -m src.main xmarket         # 교차 시장 복제 (1회 완료·실패 — 재현용)
 python -m src.main trade           # Phase D 실행기 dry-run (--live-mock 제출, 모의 전용)
+python -m src.main daily           # 일별 정산 갱신·조회 (가상 계좌 — paper/etf_daily.csv)
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
 python -m src.main brief           # STATUS.md 수동 갱신 (paper/preview 가 자동 갱신)
@@ -168,6 +169,22 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   `etf_paper.candidates`의 (code, strategy, exit, freeze) 행 단위.
   자동매매(KIS 연동)가 구현되면 이 목록에서 판정 통과 후보를 골라 실행한다 —
   별도 선택 메커니즘을 새로 만들지 말 것.
+
+## 장부 스키마 확장 + 일별 정산 (2026-08-26 저녁)
+
+- **etf_ledger.csv 정밀 컬럼 추가**: code/family/entry_price/exit_price/
+  gross_ret(비용 전)/cost. 엔진 3종(simulate/volbreak/overnight)이 체결가를
+  트레이드에 포함. 기존 26행은 결정적 리플레이 매칭으로 소급 채움 —
+  **동결 값(net_ret·hold·preview·날짜)은 불변 검증 완료** (백업 대조 26/26).
+  rotation2 행은 에피소드 구조라 체결가 NaN 유지. 구버전 장부는 로더가
+  컬럼 자동 보강 (preview 호환 관례와 동일).
+- **일별 정산** (`src/daily_settle.py`, paper/etf_daily.csv): 날짜별 진입/청산
+  건수·총수익/총손실(원)·잔액·평가금액·총자산·일간/누적 수익률. 가상 계좌
+  모형은 ops 슬롯 규칙(자본 x exposure/3 / 레버리지 — STATUS 주문 계획과
+  동일), MTM 은 일봉 종가. **이론 계좌**(증거금 없음 — 동시 신호 과다 시
+  잔액 음수 가능, 그 자체가 노출 가시화). rotation2·체결가 없는 행 제외.
+  저녁 `paper` 가 자동 갱신, `daily` 로 수동 갱신·조회. 판정과 무관한
+  파생 산출물 — 재생성 안전, 원본은 장부.
 
 ## 코드·보안·구조 재검토 (2026-08-26 완료 — 08-26 신규 모듈 전체)
 

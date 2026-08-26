@@ -177,6 +177,7 @@ paper/
   ledger.csv         ← 개별주(SK하이닉스) 가상 장부
   preview_signals.csv← "아침에 신호를 제때 봤는가" 증거 기록
   exec_plan.csv      ← 실행기의 일별 주문 계획/제출 기록 (2026-08-26부터)
+  etf_daily.csv      ← 일별 정산표: 그날 거래·수익/손실·잔액·평가금액 (가상 1천만원 기준)
   logs/              ← 자동 실행 일지
 results/             ← 시험 성적표들 (md 파일들을 열어보면 각 실험의 결론)
   multiple_testing.md← "144번 시험한 것을 감안하면?" 다중검정 보정 결과 (8장 참고)

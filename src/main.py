@@ -136,10 +136,25 @@ def cmd_paper(show_preview: bool, force: bool) -> None:
                                               "fwd_cum": "{:+.2%}".format,
                                               "ok_mean": "{:+.3%}".format,
                                               "insample_mean": "{:+.3%}".format}))
+    from .daily_settle import update_daily_settlement
+
+    update_daily_settlement(etf_ledger, status)
+
     from .brief import STATUS_PATH, write_status
 
     write_status("evening")
     print(f"\nbrief: {STATUS_PATH}")
+
+
+def cmd_daily() -> None:
+    """일별 정산 갱신·조회 — 장부 리플레이(멱등) 후 가상 계좌 일별 CSV 재생성."""
+    from .daily_settle import update_daily_settlement
+    from .etf_paper import update_etf_ledger
+
+    ledger, added, status = update_etf_ledger(False)
+    if added:
+        print(f"[ETF] ledger: {added} new closed trade(s) appended")
+    update_daily_settlement(ledger, status, show_tail=15)
 
 
 def cmd_ml() -> None:
@@ -519,7 +534,8 @@ def main() -> None:
                                  "paper", "ml", "analysis", "sizing", "minute", "stoploss",
                                  "etf", "portfolio", "refine", "crash", "rotation",
                                  "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
-                                 "sleeves", "xmarket", "trade", "brief", "health", "all"])
+                                 "sleeves", "xmarket", "trade", "daily", "brief",
+                                 "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -557,6 +573,7 @@ def main() -> None:
         "sleeves": lambda: cmd_sleeves(args.force),
         "xmarket": lambda: cmd_xmarket(args.force),
         "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy, args.auto),
+        "daily": cmd_daily,
         "brief": cmd_brief,
         "health": cmd_health,
     }
