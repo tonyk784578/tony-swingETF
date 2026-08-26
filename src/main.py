@@ -36,10 +36,9 @@ def cmd_download(force: bool) -> None:
         codes |= set(rotation2_universe())
     for code in sorted(codes):
         load_symbol(code, "kr", force)
-    # 외국인 수급 캐시 (flow 전략) — 실패해도 degrade (flow_data 내부 [warn])
-    from .flow_data import update_flow_caches
-
-    update_flow_caches()
+    # 외국인 수급(flow)은 기각 종결(2026-08-26) — 일일 수집 안 함 (ewy 관례:
+    # 소급 가능 데이터는 새 가설 등록 시점에 받는다). 캐시는 재현용 잔존,
+    # 백필은 flow_data.update_flow_caches() 수동 호출로 언제든 복원 가능.
     print(summarize(data))
 
 
