@@ -36,6 +36,10 @@ def cmd_download(force: bool) -> None:
         codes |= set(rotation2_universe())
     for code in sorted(codes):
         load_symbol(code, "kr", force)
+    # 외국인 수급 캐시 (flow 전략) — 실패해도 degrade (flow_data 내부 [warn])
+    from .flow_data import update_flow_caches
+
+    update_flow_caches()
     print(summarize(data))
 
 
@@ -281,6 +285,22 @@ def cmd_etf(force: bool) -> None:
         for _, r in oc["holdout"].iterrows():
             print(f"  {r['etf']}: {r['verdict']}")
     print("report:", RESULTS_DIR / "overnight_screening.md")
+
+    # flow 부속 진단 (사전 등록 약속 — 교정 t·trend 중복·홀드아웃 확인)
+    from .flow_check import run_flow_check
+
+    fc = run_flow_check(df, force=False)
+    print("\n=== flow 진단 (사전 등록 부속표) ===")
+    print(f"풀 t: 나이브 {fc['naive_t']:.2f} → 일 단위 교정 {fc['daily_t']:.2f} "
+          f"({fc['daily_n']}일) | trend 슬리브 상관 ρ={fc['corr']:.2f}"
+          + (" — 같은 리스크 그룹 취급" if fc["same_group"] else ""))
+    if fc["passers"].empty:
+        print("게이트 통과 0건 — 계열 종결 (변형 재시험 금지)")
+    else:
+        print(f"게이트 통과 {len(fc['passers'])}건 → 홀드아웃 방향 확인:")
+        for _, r in fc["holdout"].iterrows():
+            print(f"  {r['etf']}: {r['verdict']}")
+    print("report:", RESULTS_DIR / "flow_screening.md")
 
 
 def cmd_portfolio(force: bool) -> None:

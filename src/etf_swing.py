@@ -166,6 +166,13 @@ def raw_entry_signal(df: pd.DataFrame, strategy: str, us_ret_mapped: pd.Series) 
         # 교차상장 신호: 매핑된 전일(미국) EWY 수익률이 임계 이상 — us_dip처럼
         # 매핑 자체가 '미국 날짜 < D'라 그대로 D 진입 플래그 (룩어헤드 없음)
         return us_ret_mapped.reindex(df.index) >= p["threshold"]
+    if strategy == "flow":
+        # 외국인 수급 5일 롤링합 양전 크로스 — ext 시리즈 슬롯(us_ret_mapped)에
+        # 해당 시장 외국인 순매매(억원)가 실려 온다 (ewy의 슬롯 재사용 관례).
+        # 수급(D)은 D 장 마감 후 확정 → raw(D)=True 는 'D+1 시가 진입' (shift는
+        # build_flags 몫 — 가격 전략과 동일 구조)
+        roll = us_ret_mapped.reindex(df.index).rolling(p["window"]).sum()
+        return (roll > 0) & (roll.shift(1) <= 0)
     if strategy == "tom":
         # 월초 첫 거래일 = 직전 거래일과 (연,월)이 다름. us_dip처럼 그 자체가
         # 'D 시가 진입' 플래그다 (달력 정보는 D 개장 전에 확정 — shift 불필요)
@@ -196,6 +203,11 @@ def build_flags(df: pd.DataFrame, strategy: str,
         # 상승장 추세 라이더: 전략별 max_hold(60)가 기본 10일 캡을 대체 —
         # 추세 이탈(종가<MA20) 전까지 보유를 연장하는 것이 가설의 핵심
         return raw.shift(1), close < close.rolling(p["exit_ma"]).mean(), p["max_hold"]
+    if strategy == "flow":
+        # 청산은 의도적 1일 지연 — D 종가 시점엔 D의 확정 수급을 모른다
+        # (가격과 달리 수급은 장 마감 후 확정 — PREREG_flow.md §3)
+        roll = us_ret_mapped.reindex(df.index).rolling(p["window"]).sum()
+        return raw.shift(1), (roll < 0).shift(1), cfg["max_hold"]
     # us_dip / tom / ewy_*: raw 가 곧 진입 플래그, 고정 보유일 청산
     return raw, pd.Series(False, index=df.index), p["hold_days"]
 
@@ -254,6 +266,12 @@ def iter_screen_trades(universe: dict, strategies: list[str], force: bool):
     nasdaq = load_symbol("^IXIC", "us", force)
     needs_ewy = any(s.startswith("ewy_") for s in strategies)
     ewy = load_symbol("EWY", "us", force) if needs_ewy else None
+    flow_by_market: dict[str, pd.Series] = {}
+    if "flow" in strategies:
+        from .flow_data import load_flow
+
+        for m in set(ecfg["strategies"]["flow"]["markets"].values()):
+            flow_by_market[m] = load_flow(m)["foreign"]
     for code, name in universe.items():
         df = load_symbol(str(code), "kr", force)
         df = df[df.index <= cut]  # 장중 실행 시 당일 미완성 봉 제외
@@ -268,7 +286,13 @@ def iter_screen_trades(universe: dict, strategies: list[str], force: bool):
                 trades = simulate_overnight(
                     df, ecfg["strategies"]["overnight"]["entry_above"], cost)
             else:
-                us_series = ewy_mapped if strat.startswith("ewy_") else us_mapped
+                if strat == "flow":   # 수급 시리즈가 ext 슬롯에 실린다
+                    us_series = flow_by_market[
+                        ecfg["strategies"]["flow"]["markets"][str(code)]]
+                elif strat.startswith("ewy_"):
+                    us_series = ewy_mapped
+                else:
+                    us_series = us_mapped
                 entry, exit_, max_hold = build_flags(df, strat, us_series)
                 trades = simulate(df, entry, exit_, max_hold, cost)
             yield {"etf": name, "code": code, "strategy": strat,
@@ -368,6 +392,7 @@ _STRATEGY_STATUS = {
     "overnight":  "1/12 통과 (KODEX_Semicon, 홀드아웃 양수 재현) — Stage 2 섀도. "
                   "주의: 계열 풀은 음수(일단위 t=-3.31) — 광범위 야간 프리미엄 기각, "
                   "volbreak과 같은 리스크 그룹(ρ=0.54)",
+    "flow":       "2026-08-26 사전 등록 (PREREG_flow.md) — 1회 시험",
 }
 
 
