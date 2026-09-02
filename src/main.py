@@ -518,6 +518,19 @@ def cmd_trade(live_mock: bool, liquidate_legacy: bool, auto: bool = False,
               close_window=close_window)
 
 
+def cmd_xdata(force: bool) -> None:
+    from .xsection_data import backfill, coverage_report
+
+    backfill(force)
+    coverage_report()
+
+
+def cmd_xsection() -> None:
+    from .xsection import run_xsection
+
+    run_xsection()
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -538,7 +551,7 @@ def main() -> None:
                                  "etf", "portfolio", "refine", "crash", "rotation",
                                  "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
                                  "sleeves", "xmarket", "trade", "daily", "brief",
-                                 "health", "all"])
+                                 "xdata", "xsection", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -581,6 +594,8 @@ def main() -> None:
                                    args.close_window),
         "daily": cmd_daily,
         "brief": cmd_brief,
+        "xdata": lambda: cmd_xdata(args.force),
+        "xsection": cmd_xsection,
         "health": cmd_health,
     }
     if args.step == "all":
