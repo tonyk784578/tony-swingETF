@@ -366,10 +366,24 @@ def run_ext_screening(force: bool = False) -> pd.DataFrame | None:
     return out
 
 
+def gate_mask(df: pd.DataFrame, t_min: float = 2.0) -> pd.Series:
+    """Stage 1 게이트 술어 — rankable & 전/후반 부호 & t>=t_min.
+
+    5곳(스크리닝 리포트·main 요약 2곳·flow/overnight 진단)이 각자 쓰던 식을
+    단일화 (2026-08-26 검토 잔여 권고). 게이트 정의 변경은 여기 한 곳에서만.
+    """
+    return df["rankable"] & df["sign_holds"] & (df["t_stat"] >= t_min)
+
+
+def gate_row(row, t_min: float = 2.0) -> bool:
+    """gate_mask 의 단일 행 버전 (진단 모듈의 행 단위 통과 표시용)."""
+    return bool(row["rankable"] and row["sign_holds"] and row["t_stat"] >= t_min)
+
+
 def _screen_report(df: pd.DataFrame, header: str, gate_note: str, stem: str) -> None:
     """스크리닝 결과 md 공용 작성기 — 본/확장 스크리닝이 표 형식을 공유한다."""
     cfg = load_config()["etf"]
-    top = df[df["rankable"] & df["sign_holds"] & (df["t_stat"] >= 2)]
+    top = df[gate_mask(df)]
     lines = [header,
              f"\n## 통과 후보 (N >= {cfg['min_trades']}, 전/후반 모두 양수, t >= 2{gate_note})",
              "",

@@ -28,9 +28,14 @@ ops:
   exposure: 0.41             # 총노출 — portfolio 부트스트랩 q5 캘리브레이션 권고
                              # (2026-08-10 반영: 구 점추정 0.58 → 분위수 기준 0.41)
   notify_signals: true       # 아침 신호 발동 시 데스크톱 알림
-  legacy_codes: ["139660", "143850"]   # SwingETF 이관 잔여 매도 실패분 (2026-08-26 동결)
-                             # — liquidate-legacy 는 이 목록만 매도한다. 실행기가 연
-                             # 포지션을 오인 청산하는 사고 방지. 청산 완료 후 비울 것
+  legacy_codes: []           # SwingETF 이관 잔여 — 2026-09-02 잔고 조회로 소멸 확인
+                             # (139660/143850 — 모의 서버 이월 정합화로 종결). 목록
+                             # 관례 유지: 향후 잔류물 발견 시 여기 동결 등록 후 청산
+  same_code_slot_cap: 1      # 같은 밤 동일 ETF 보유 슬리브 수 상한 (집행 계층만 —
+                             # Semicon volbreak+overnight 동시 발동 시 두 번째 매수
+                             # 생략. 섀도 장부·판정은 양쪽 다 기록)
+  close_window: ["15:15", "15:30"]   # 15:20 실행 창 허용 시각 (--auto 가드 —
+                             # 마감 동시호가 참여로 종가 체결 근사)
   trade_mode: live_mock      # 아침 자동 실행기 모드: dry_run(계획만 기록) |
                              # live_mock(KIS 모의계좌 실제 제출 — 모의 전용 클라이언트).
                              # 운영 편의 값 — dry_run 로그가 며칠 깨끗하면 live_mock 전환 권장.

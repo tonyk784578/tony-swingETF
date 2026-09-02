@@ -89,6 +89,7 @@ python -m src.main rotation        # 로테이션 실험1(기각) 재현 + 실�
 python -m src.main sleeves         # 통합 슬리브 리스크 뷰 (중복 보유·슬리브 상관 — 측정만)
 python -m src.main xmarket         # 교차 시장 복제 (1회 완료·실패 — 재현용)
 python -m src.main trade           # Phase D 실행기 dry-run (--live-mock 제출, 모의 전용)
+                                   # --close-window: 15:20 창 (종가 매수/청산 — cron 자동)
 python -m src.main daily           # 일별 정산 갱신·조회 (가상 계좌 — paper/etf_daily.csv)
 .venv/bin/ruff check src/ tests/   # 린트 (ruff.toml) — 커밋 전 필수
 python -m src.main health          # 헬스체크 + 판정 준비 상태 (evening cron 자동)
@@ -185,6 +186,41 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   잔액 음수 가능, 그 자체가 노출 가시화). rotation2·체결가 없는 행 제외.
   저녁 `paper` 가 자동 갱신, `daily` 로 수동 갱신·조회. 판정과 무관한
   파생 산출물 — 재생성 안전, 원본은 장부.
+
+## 15:20 실행 창 + 운영 개선 (2026-09-02)
+
+- **15:20 실행 창 가동** (`trade --auto --close-window`, Phase D 마일스톤 완료):
+  현재가 API(`kis.quote`)로 잠정 당일 봉(시가/고가/저가/현재가)을 만들어
+  **동결 엔진에 그대로 넣고**, 확정 리플레이와의 차분으로 진입/청산을 판정
+  (`_close_action` — 신호 재구현 금지 원칙의 집행 계층 적용, tests/test_executor.py).
+  volbreak 트리거 도달·overnight 양봉 → 종가 매수, swing 청산 신호(MA·트레일링·
+  보유한도) → 종가 매도. 시장가가 마감 동시호가(15:20~15:30)에 들어가 종가
+  체결을 근사한다. 아침 창에는 **1일 회전 계열 전일 매수분의 시가 매도** 추가
+  (개장 전 제출 = 시가 동시호가). 소급 재현 검증: 09-02 실데이터로 overnight
+  Semicon 매수 @121,100(섀도와 일치) + volbreak 합산 캡 작동 확인.
+  cron 3슬롯(15:21/24/27, 스탬프 중복 차단, `run_close_window.sh`) — **crontab
+  반영은 권한 제약으로 `scripts/crontab.proposed` 수동 1회 적용 필요.**
+  창을 다 놓친 날은 모의 제출만 빠지고 섀도 장부는 무영향. 휴장일은 주문 거절이
+  자기교정. 모의 레이트리밋 실측 갱신: 0.6s 간격도 EGW00201 발생 → 시세는
+  1.1s 간격 + 1회 재시도.
+- **동일 ETF 노출 합산 캡 코드화** (config `ops.same_code_slot_cap: 1`):
+  같은 밤 같은 ETF를 여러 슬리브가 사면 두 번째 매수 생략 (집행 계층만 —
+  섀도 장부·판정은 양쪽 다 기록). 실행기 보유 추적은 exec_plan 라이프사이클
+  (`mock_positions` — 모의 서버가 주문 조회 불가라 잔고 차분+기록이 유일 수단).
+- **잔여 보유 종결**: 139660/143850 이 잔고에서 소멸 확인 (모의 서버 이월
+  정합화 추정) — `ops.legacy_codes` 비움. 현재 모의계좌 = 실행기 보유만.
+- **08-28 데이터 정정 검토 완료** (results/revision_review_20260828.md):
+  KODEX_Bank·TIGER_REITs 정정(최대 0.77%)은 rotation2 에피소드 선택 불일치
+  0/71, 수익률 차이 최대 0.009%p — **영향 없음**. ALERT 는 7일 창 만료로
+  09-04 자동 해소.
+- **구조 권고 2/3 반영**: 게이트 술어 helper 단일화(`etf_swing.gate_mask/
+  gate_row` — 5곳), 중복 보유 감지 통합(`sleeve_report.dup_holdings` — brief와
+  공용, sleeves 출력 diff 0 확인). flow_check/overnight_check 사본 구조
+  모듈화는 **의도적 보류** — 동결된 재현 전용 모듈이라 리팩토링 이득보다
+  동결 훼손 위험이 큼. 다음 기능 수정 때 함께.
+- **PREMORTEM S11/S12 추가** (표본 13% 시점 사전 등록): S11 포워드 괴리
+  중간점검은 판정 표본 절반 도달 시 1회 문서화만(행동 촉발 불가), S12 실행기
+  이상 시 킬 스위치는 `ops.trade_mode: dry_run` 전환(섀도·판정과 독립).
 
 ## 코드·보안·구조 재검토 (2026-08-26 완료 — 08-26 신규 모듈 전체)
 

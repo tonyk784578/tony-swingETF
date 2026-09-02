@@ -29,7 +29,9 @@ _TOKEN_CACHE = DATA_DIR / ".kis_token.json"
 _REFRESH_MARGIN = timedelta(minutes=10)
 
 # 거래 TR (모의 접두 V 고정 — SwingETF broker/schemas.py 레지스트리와 동일 접미)
-TR = {"balance": "VTTC8434R", "order_buy": "VTTC0802U", "order_sell": "VTTC0801U"}
+# 시세 TR(quote)은 실전/모의 공통 id — 조회 전용이라 주문 경로와 무관
+TR = {"balance": "VTTC8434R", "order_buy": "VTTC0802U", "order_sell": "VTTC0801U",
+      "quote": "FHKST01010100"}
 
 
 def _load_env() -> dict:
@@ -128,6 +130,21 @@ class KIS:
                     for h in d.get("output1", []) if int(h["hldg_qty"]) > 0]
         return {"cash": int(s.get("dnca_tot_amt", 0)),
                 "total": int(s.get("tot_evlu_amt", 0)), "holdings": holdings}
+
+    def quote(self, code: str) -> dict:
+        """현재가 시세 — 15:20 실행 창의 잠정 당일 봉 재료.
+
+        반환: {'price'(현재가), 'open', 'high', 'low'}. 휴장일에는 직전 거래일
+        값이 그대로 오는데, 그 경우 후속 주문이 '장 운영시간 아님'으로 거절되어
+        자기교정된다 (별도 휴장 캘린더를 두지 않는 근거).
+        """
+        d = self._request("GET", "/uapi/domestic-stock/v1/quotations/inquire-price",
+                          TR["quote"],
+                          params={"FID_COND_MRKT_DIV_CODE": "J",
+                                  "FID_INPUT_ISCD": code})
+        o = d.get("output", {})
+        return {"price": float(o["stck_prpr"]), "open": float(o["stck_oprc"]),
+                "high": float(o["stck_hgpr"]), "low": float(o["stck_lwpr"])}
 
     def _hashkey(self, body: dict) -> str:
         r = requests.post(f"{MOCK_BASE}/uapi/hashkey",

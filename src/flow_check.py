@@ -20,7 +20,14 @@ import pandas as pd
 
 from .backtest import combo_stats
 from .config import RESULTS_DIR, load_config
-from .etf_swing import build_flags, iter_candidates, iter_screen_trades, simulate
+from .etf_swing import (
+    build_flags,
+    gate_mask,
+    gate_row,
+    iter_candidates,
+    iter_screen_trades,
+    simulate,
+)
 from .flow_data import load_flow
 from .holdout import load_holdout_symbol, one_sided_t
 
@@ -81,8 +88,7 @@ def run_flow_check(screen: pd.DataFrame, force: bool = False) -> dict:
     same_group = bool(np.isfinite(corr) and abs(corr) > 0.5)
 
     # 3. 게이트 통과분 홀드아웃 방향 확인 (KOSPI 계열만 가능 — 등록 규칙)
-    mask = (screen["strategy"].eq("flow") & screen["rankable"]
-            & screen["sign_holds"] & (screen["t_stat"] >= 2))
+    mask = screen["strategy"].eq("flow") & gate_mask(screen)
     passers = screen[mask]
     code_by_name = {v: k for k, v in ecfg["universe"].items()}
     hold_rows = []
@@ -124,7 +130,7 @@ config `etf.strategies.flow` (2026-08-26) | 본표: etf_screening.csv
 | ETF | N | 평균보유 | 평균 | 승률 | 누적 | MDD | t | 전반 | 후반 | 게이트 |
 |---|---|---|---|---|---|---|---|---|---|---|"""]
     for _, r in sc.iterrows():
-        ok = bool(r["rankable"] and r["sign_holds"] and r["t_stat"] >= 2)
+        ok = gate_row(r)
         lines.append(f"| {r['etf']} | {r['n']} | {r['avg_hold']:.1f}일 | {r['mean']:+.3%} "
                      f"| {r['win']:.1%} | {r['cum']:+.1%} | {r['mdd']:.1%} "
                      f"| {r['t_stat']:.2f} | {r['first_mean']:+.3%} "

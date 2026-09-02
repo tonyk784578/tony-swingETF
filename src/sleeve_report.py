@@ -27,6 +27,19 @@ def _sleeve_of(cand: dict) -> str:
     return cand.get("family", "trend")
 
 
+def dup_holdings(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
+    """동일 ETF 를 여러 전략이 보유하는 중복 — {이름: [전략, ...]}.
+
+    brief(STATUS 경고)와 sleeve_report(통합 뷰)가 각자 구현하던 감지를 단일화
+    (2026-08-26 검토 잔여 권고). 입력은 (이름, 전략) 쌍 목록 — 데이터 출처
+    (아침 states / 장부 positions)와 무관하게 같은 규칙을 쓴다.
+    """
+    held: dict[str, list[str]] = {}
+    for name, strategy in pairs:
+        held.setdefault(name, []).append(strategy)
+    return {n: s for n, s in held.items() if len(s) > 1}
+
+
 def run_sleeves(force: bool = False) -> dict:
     from .etf_paper import candidate_states, load_etf_ledger, rotation2_state
 
@@ -50,8 +63,9 @@ def run_sleeves(force: bool = False) -> dict:
     positions = pd.DataFrame(pos_rows)
     dup = pd.DataFrame()
     if not positions.empty:
-        by_name = positions[positions["strategy"] != "rotation2"].groupby("name")
-        dup = by_name.filter(lambda g: len(g) > 1)
+        nonrot = positions[positions["strategy"] != "rotation2"]
+        dups = dup_holdings(list(zip(nonrot["name"], nonrot["strategy"], strict=True)))
+        dup = nonrot[nonrot["name"].isin(dups)]
 
     # 2. 슬리브 일간 수익 상관 (장부 기반 — 청산일 귀속 근사)
     corr = pd.DataFrame()

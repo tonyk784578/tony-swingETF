@@ -26,7 +26,7 @@ import pandas as pd
 
 from .backtest import combo_stats
 from .config import RESULTS_DIR, load_config
-from .etf_swing import iter_screen_trades, simulate_overnight
+from .etf_swing import gate_mask, gate_row, iter_screen_trades, simulate_overnight
 from .holdout import load_holdout_symbol, one_sided_t
 
 
@@ -87,8 +87,7 @@ def run_overnight_check(screen: pd.DataFrame, force: bool = False) -> dict:
     same_group = abs(corr_union) > 0.5 or abs(corr_active) > 0.5
 
     # 3. 게이트 통과분 홀드아웃 방향 확인 (사전 등록 — 통과 후보에 한해 1회)
-    mask = (screen["strategy"].eq("overnight") & screen["rankable"]
-            & screen["sign_holds"] & (screen["t_stat"] >= 2))
+    mask = screen["strategy"].eq("overnight") & gate_mask(screen)
     passers = screen[mask]
     code_by_name = {v: k for k, v in ecfg["universe"].items()}
     hold_rows = []
@@ -127,7 +126,7 @@ config `etf.strategies.overnight` (2026-08-26) | 본표: etf_screening.csv
 | ETF | N | 평균 | 승률 | 누적 | MDD | t | 전반 | 후반 | 게이트 |
 |---|---|---|---|---|---|---|---|---|---|"""]
     for _, r in sc.iterrows():
-        ok = bool(r["rankable"] and r["sign_holds"] and r["t_stat"] >= 2)
+        ok = gate_row(r)
         lines.append(f"| {r['etf']} | {r['n']} | {r['mean']:+.3%} | {r['win']:.1%} "
                      f"| {r['cum']:+.1%} | {r['mdd']:.1%} | {r['t_stat']:.2f} "
                      f"| {r['first_mean']:+.3%} | {r['second_mean']:+.3%} "

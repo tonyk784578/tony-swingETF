@@ -256,11 +256,11 @@ def cmd_etf(force: bool) -> None:
                      formatters={"avg_hold": "{:.1f}".format, "mean": pct,
                                  "win": "{:.1%}".format, "cum": "{:+.1%}".format,
                                  "mdd": "{:.1%}".format, "t_stat": "{:.2f}".format}))
-    passed = df[df["rankable"] & df["sign_holds"] & (df["t_stat"] >= 2)]
+    from .etf_swing import gate_mask, run_ext_screening, write_strategy_compare
+
+    passed = df[gate_mask(df)]
     print(f"\nStage-2 후보 (N>=30, 전/후반 양수, t>=2): {len(passed)}개")
     print("report:", RESULTS_DIR / "etf_screening.md")
-
-    from .etf_swing import run_ext_screening, write_strategy_compare
 
     ext = run_ext_screening(force)
     if ext is not None:
@@ -272,7 +272,7 @@ def cmd_etf(force: bool) -> None:
                                      "win": "{:.1%}".format, "cum": "{:+.1%}".format,
                                      "mdd": "{:.1%}".format, "t_stat": "{:.2f}".format}))
 
-        ext_pass = ext[ext["rankable"] & ext["sign_holds"] & (ext["t_stat"] >= 2)]
+        ext_pass = ext[gate_mask(ext)]
         print(f"확장 통과 (게이트 동일): {len(ext_pass)}개")
         print("report:", RESULTS_DIR / "etf_ext_screening.md")
 
@@ -510,10 +510,12 @@ def cmd_xmarket(force: bool) -> None:
     run_crossmarket_volbreak(force)  # volbreak 복제 (PREREG_xmarket2)
 
 
-def cmd_trade(live_mock: bool, liquidate_legacy: bool, auto: bool = False) -> None:
+def cmd_trade(live_mock: bool, liquidate_legacy: bool, auto: bool = False,
+              close_window: bool = False) -> None:
     from .executor import run_trade
 
-    run_trade(live_mock=live_mock, liquidate_legacy=liquidate_legacy, auto=auto)
+    run_trade(live_mock=live_mock, liquidate_legacy=liquidate_legacy, auto=auto,
+              close_window=close_window)
 
 
 def cmd_report() -> None:
@@ -546,6 +548,8 @@ def main() -> None:
                         help="trade: SwingETF 잔여 보유 전량 시장가 청산 (--live-mock 필요)")
     parser.add_argument("--auto", action="store_true",
                         help="trade: cron 경로 — 모드를 config ops.trade_mode에서 읽음")
+    parser.add_argument("--close-window", action="store_true",
+                        help="trade: 15:20 실행 창 — 잠정 당일 봉으로 종가 매수/청산")
     args = parser.parse_args()
 
     ensure_dirs()
@@ -573,7 +577,8 @@ def main() -> None:
         "holdout": lambda: cmd_holdout(args.force),
         "sleeves": lambda: cmd_sleeves(args.force),
         "xmarket": lambda: cmd_xmarket(args.force),
-        "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy, args.auto),
+        "trade": lambda: cmd_trade(args.live_mock, args.liquidate_legacy, args.auto,
+                                   args.close_window),
         "daily": cmd_daily,
         "brief": cmd_brief,
         "health": cmd_health,
