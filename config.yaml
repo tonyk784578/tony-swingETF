@@ -443,7 +443,8 @@ multiple_testing:
   # 무엇이 아닌가: 새 전략·파라미터·데이터를 도입하지 않는다 → 시험 수 불변.
   #   판정 기준(etf_paper.judgment)은 동결 상태 그대로이며 이 결과로 바꾸지 않는다
   #   (사후 기준 변경 금지). 출력은 해석 자료.
-  declared_trials: 160
+  declared_trials: 161   # 160 + xsection 1건 (2026-09-03 사전 등록 — 단일 설정,
+                         # 피처·모델·판정 전부 등록 시점 고정이라 1회로 계산)
   # ^ CLAUDE.md 누적 스크리닝 테스트 수 (2026-08-26 overnight 12 + flow 4 추가로
   #   144 → 160). 코드로 재현 가능한 조합은 142개(스크리닝 140 + 로테이션 2)지만,
   #   refine(레짐필터·청산)·crash(MA200 게이트) 변형 시험도
@@ -773,3 +774,42 @@ paper:
       condition: "sox_down1 & nvda_down2"
     - stock: SKHynix
       condition: "nvda_down2 & gap_down"
+
+xsection:
+  # 횡단면 ML 랭킹 프로그램 (2026-09-03 사전 등록 — 전문 PREREG_xsection.md,
+  # 실행 전 커밋으로 등록이 결과보다 먼저임을 git이 증명. overnight/xmarket 관례).
+  # 가설: 개별주 횡단면의 표준 특성(모멘텀·반전·저변동성·52주고점·유동성 —
+  # 전부 문헌 확립 팩터)을 소형 GBM으로 결합하면 시장중립 주간 랭킹 포트폴리오가
+  # 성립한다. 폭(주 ~600종목 풀, 50종목 보유)이 커서 포워드 검증이 연 단위 —
+  # ETF 스윙(2.3년)의 구조적 한계(폭 부족)를 우회하는 신규 독립 프로그램.
+  # 파라미터는 전부 표준값/기존 동결값 재사용 — 그리드서치 없음, 1회 실행 판정.
+  start: "2015-01-01"
+  markets: [KOSPI, KOSDAQ]
+  # 유니버스: 보통주만 (코드 끝 '0') + 이름 필터. 상폐 종목 포함 (FDR
+  # KRX-DELISTING 실측 — 상폐일까지 가격 수신 확인, 생존편향 제거)
+  exclude_name_patterns: ["스팩", "리츠", "인프라", "펀드"]
+  liquidity:            # 리밸런스일마다 과거 데이터만으로 판정
+    min_median_amount_20d: 1000000000   # 20일 중앙 거래대금 >= 10억원
+    min_price: 1000                     # 동전주 배제 (수정주가 기준 — 한계 명시)
+    min_active_days_20d: 15             # 거래정지·저활동 배제
+  features: [mom_12_1, mom_6_1, rev_21, vol_60, high_52w, amihud_21,
+             max_ret_21, overnight_21, amt_trend, log_amt_63]
+  target_horizon: 5     # 학습 목표 = 진입 시가(E) -> 5거래일 뒤 시가, 날짜 내 랭크 변환
+  rebalance: weekly     # 주 첫 거래일 시가 리밸런스 (신호는 직전 거래일 종가까지)
+  top_n: 50             # 상위 50 동일비중 롱
+  cost_round_trip: 0.003   # 개별주 왕복 0.30% (거래세+수수료+슬리피지 보수) — 회전분만
+  hedge:
+    index: KS200        # 백테스트 프록시 = KOSPI200 지수 (실집행은 선물 -03 계좌)
+    cost_weekly: 0.0002
+  model_reuse: ml.model # LGBMRegressor 하이퍼파라미터 = ml 동결값 그대로 (재튜닝 금지)
+  walkforward:
+    train_end: 2019     # 2015~2019 최초 학습 -> 2020~ 연 단위 확장 (ml 동결 구조)
+    oos_start: 2020
+  judgment:             # 사전 등록 판정 — 변경 금지
+    # Stage 1 (백테스트 1회): OOS(2020~) 주간 L/S 단측 t>=3.0 AND 연환산
+    # Sharpe>=1.5 AND OOS 연도별 양수 >=5/7 — 셋 다 충족해야 섀도 개시
+    stage1: {t_min: 3.0, sharpe_min: 1.5, positive_years_min: 5}
+    # Stage 2 (섀도 포워드, O'Brien-Fleming 근사 2회 순차 — 전체 단측 alpha 0.05):
+    # 125거래일 t>=2.44 (조기 통과) / 250거래일 t>=1.69 (최종). 미통과 시 프로그램
+    # 종결 — 검정력: 포워드 SR 2.0 재현 시 ~58%, 1.5면 ~37% (정직한 한계 명시)
+    stage2_looks: [{days: 125, t_min: 2.44}, {days: 250, t_min: 1.69}]
