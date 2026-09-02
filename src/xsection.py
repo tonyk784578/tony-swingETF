@@ -132,18 +132,20 @@ def build_panel(verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame,
 
     # 진입일/라벨 (등록 §5): E = S 다음 마스터 거래일, X = E+5 마스터 거래일
     s_to_e = {s: e for e, s in sig_of.items()}
-    panel["entry_day"] = panel["sig_day"].map(s_to_e)
+    panel["entry_day"] = pd.to_datetime(panel["sig_day"].map(s_to_e))
     e_pos = panel["entry_day"].map(lambda d: cal.get_loc(d))
     x_pos = (e_pos + cfg["target_horizon"]).clip(upper=len(cal) - 1)
-    panel["exit_label_day"] = [cal[i] for i in x_pos]
+    panel["exit_label_day"] = pd.to_datetime([cal[i] for i in x_pos])
 
     entry_px = opens_w.to_numpy()[e_pos.to_numpy(),
                                   opens_w.columns.get_indexer(panel["code"])]
     exit_px = exitpx_w.to_numpy()[x_pos.to_numpy(),
                                   exitpx_w.columns.get_indexer(panel["code"])]
     panel["entry_px"] = entry_px
-    panel["y_raw"] = exit_px / entry_px - 1
-    panel = panel[np.isfinite(panel["entry_px"]) & np.isfinite(panel["y_raw"])]
+    with np.errstate(divide="ignore", invalid="ignore"):   # 0/NaN 진입가는 아래서 제거
+        panel["y_raw"] = exit_px / entry_px - 1
+    panel = panel[np.isfinite(panel["entry_px"]) & (panel["entry_px"] > 0)
+                  & np.isfinite(panel["y_raw"])]
     # 라벨 = 날짜 내 횡단면 랭크 (시장 방향 제거 — 등록 §5)
     panel["y_rank"] = panel.groupby("sig_day")["y_raw"].rank(pct=True)
     if verbose:
