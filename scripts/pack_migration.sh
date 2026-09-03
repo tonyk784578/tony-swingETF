@@ -3,7 +3,8 @@
 #   scripts/pack_migration.sh            → ~/TonySwingETF_migration_<날짜시각>.tar.gz
 #   scripts/pack_migration.sh --handoff  → 압축 후 이 노트북의 TonySwingETF 크론 라인을
 #                                          주석 처리 (이관일에 쓰는 형태 — 두 기기 동시 실행 방지)
-#   두 번째 인자로 출력 디렉토리 지정 가능.
+#   두 번째 인자로 출력 디렉토리 지정 가능. PACK_NO_CRED=1 이면 GitHub 토큰 미동봉
+#   (워크스테이션에서 첫 git push 때 토큰을 한 번 입력).
 #
 # 포함: git 저장소(.git), 소스, config, paper/ 전체(장부·로그·성공 스탬프),
 #       data/ 전체(분봉 캐시는 60일 밖 소급 불가 — 반드시 포함), results/,
@@ -31,7 +32,7 @@ fi
 
 # git push 자격증명(~/.git-credentials)도 동봉 — 워크스테이션 install 이 ~ 로 옮긴다
 EXTRA=()
-[[ -f "$HOME/.git-credentials" ]] && EXTRA=(-C "$HOME" .git-credentials)
+[[ -f "$HOME/.git-credentials" && "${PACK_NO_CRED:-0}" != "1" ]] && EXTRA=(-C "$HOME" .git-credentials)
 
 tar -C "$(dirname "$ROOT")" \
   --exclude='TonySwingETF/.venv' \
