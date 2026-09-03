@@ -1,0 +1,9 @@
+# TonySwingETF 워크스테이션용 crontab (2026-09-04 이관) — 이 프로젝트 라인만.
+# 설치: crontab scripts/crontab.workstation  (기존 crontab 이 있으면 crontab -l 과 합친 뒤 설치)
+# 전제: 시스템 시간대 Asia/Seoul (timedatectl set-timezone Asia/Seoul) — 아래 시각은 전부 KST.
+# 노트북 쪽 동일 라인은 이관 후 반드시 주석 처리 (두 기기 동시 실행 = 장부 커밋 충돌 + KIS 토큰 상호 폐기).
+30-59/5 8 * * 1-5 /home/user/Project/TonySwingETF/scripts/run_morning_catchup.sh  # 섀도 아침 프리뷰(08:30 정시 + 5분 간격 재시도, 성공 스탬프로 중복 차단)
+*/5 9 * * 1-5 /home/user/Project/TonySwingETF/scripts/run_morning_catchup.sh  # 아침 프리뷰 캐치업 연장(09:00~09:55)
+21,24,27 15 * * 1-5 /home/user/Project/TonySwingETF/scripts/run_close_window.sh  # 15:20 실행 창(마감 동시호가 직전 종가 매수/청산 — 3슬롯, 스탬프 중복 차단)
+20-59/10 16 * * 1-5 /home/user/Project/TonySwingETF/scripts/run_evening_catchup.sh  # 섀도 장부 기록(16:20 정시 + 10분 간격 재시도)
+*/10 17-23 * * 1-5 /home/user/Project/TonySwingETF/scripts/run_evening_catchup.sh  # 저녁 장부 캐치업 연장(17:00~23:55)
