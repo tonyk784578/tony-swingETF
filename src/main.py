@@ -531,6 +531,12 @@ def cmd_xsection() -> None:
     run_xsection()
 
 
+def cmd_xaccess() -> None:
+    from .xsection_access import run_access_study
+
+    run_access_study()
+
+
 def cmd_report() -> None:
     _, masters = _load_masters()
     stats = pd.concat([run_backtest(m, name) for name, m in masters.items()],
@@ -551,7 +557,7 @@ def main() -> None:
                                  "etf", "portfolio", "refine", "crash", "rotation",
                                  "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
                                  "sleeves", "xmarket", "trade", "daily", "brief",
-                                 "xdata", "xsection", "health", "all"])
+                                 "xdata", "xsection", "xaccess", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -596,6 +602,7 @@ def main() -> None:
         "brief": cmd_brief,
         "xdata": lambda: cmd_xdata(args.force),
         "xsection": cmd_xsection,
+        "xaccess": cmd_xaccess,
         "health": cmd_health,
     }
     if args.step == "all":

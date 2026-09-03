@@ -63,3 +63,8 @@
 2026-09-02,2026-09-02 09:25:29,live_mock,plan_only,102970,KODEX_Securities,volbreak,0,스탑매수 시가+202원 (KIS 조건부 주문 미지원 — 표시만),
 2026-09-02,2026-09-02 09:25:29,live_mock,plan_only,091180,KODEX_Auto,volbreak,0,스탑매수 시가+322원 (KIS 조건부 주문 미지원 — 표시만),
 2026-09-02,2026-09-02 09:25:29,live_mock,plan_only,122630,KODEX_Lev,volbreak,0,"스탑매수 시가+2,292원 (KIS 조건부 주문 미지원 — 표시만)",
+2026-09-03,2026-09-03 09:50:27,live_mock,plan_only,102970,KODEX_Securities,volbreak,0,스탑매수 시가+238원 (15:20 창에서 트리거 확인 후 제출),
+2026-09-03,2026-09-03 09:50:27,live_mock,plan_only,091180,KODEX_Auto,volbreak,0,스탑매수 시가+362원 (15:20 창에서 트리거 확인 후 제출),
+2026-09-03,2026-09-03 09:50:27,live_mock,plan_only,133690,TIGER_NASDAQ100,volbreak,0,스탑매수 시가+870원 (15:20 창에서 트리거 확인 후 제출),
+2026-09-03,2026-09-03 09:50:27,live_mock,plan_only,305720,KODEX_Battery,volbreak,0,스탑매수 시가+322원 (15:20 창에서 트리거 확인 후 제출),
+2026-09-03,2026-09-03 09:50:27,live_mock,plan_only,122630,KODEX_Lev,volbreak,0,"스탑매수 시가+2,158원 (15:20 창에서 트리거 확인 후 제출)",
