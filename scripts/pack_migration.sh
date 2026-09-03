@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 이관용 전체 압축 (2026-09-04 GPU 워크스테이션 이관).
 #   scripts/pack_migration.sh            → ~/TonySwingETF_migration_<날짜시각>.tar.gz
-#   scripts/pack_migration.sh /경로/디렉토리   → 지정 디렉토리에 생성
+#   scripts/pack_migration.sh --handoff  → 압축 후 이 노트북의 TonySwingETF 크론 라인을
+#                                          주석 처리 (이관일에 쓰는 형태 — 두 기기 동시 실행 방지)
+#   두 번째 인자로 출력 디렉토리 지정 가능.
 #
 # 포함: git 저장소(.git), 소스, config, paper/ 전체(장부·로그·성공 스탬프),
 #       data/ 전체(분봉 캐시는 60일 밖 소급 불가 — 반드시 포함), results/,
@@ -13,6 +15,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HANDOFF=0
+if [[ "${1:-}" == "--handoff" ]]; then HANDOFF=1; shift; fi
 OUT_DIR="${1:-$HOME}"
 STAMP="$(date +%Y%m%d_%H%M)"
 OUT="$OUT_DIR/TonySwingETF_migration_${STAMP}.tar.gz"
@@ -25,14 +29,25 @@ if [[ "$(cat paper/logs/.morning_done 2>/dev/null || true)" != "$(date +%F)" ]];
   echo "       market_snapshots 미기록 상태. 평일이면 아침 루틴 완료 후 다시 압축할 것." >&2
 fi
 
+# git push 자격증명(~/.git-credentials)도 동봉 — 워크스테이션 install 이 ~ 로 옮긴다
+EXTRA=()
+[[ -f "$HOME/.git-credentials" ]] && EXTRA=(-C "$HOME" .git-credentials)
+
 tar -C "$(dirname "$ROOT")" \
   --exclude='TonySwingETF/.venv' \
   --exclude='TonySwingETF/.pytest_cache' \
   --exclude='TonySwingETF/.ruff_cache' \
   --exclude='__pycache__' \
-  -czf "$OUT" TonySwingETF
+  -czf "$OUT" TonySwingETF "${EXTRA[@]}"
 
 chmod 600 "$OUT"   # .env 포함 — 소유자만 읽기
 echo "생성: $OUT ($(du -h "$OUT" | cut -f1))"
 echo "검증: tar -tzf \"$OUT\" | wc -l  → 파일 수"
 echo "체크섬: $(sha256sum "$OUT" | cut -c1-16)…  (워크스테이션에서 sha256sum 으로 대조)"
+
+if [[ $HANDOFF -eq 1 ]]; then
+  crontab -l | sed 's|^\([^#].*TonySwingETF/scripts/\)|# [이관 '"$(date +%F)"'] \1|' | crontab -
+  n=$(crontab -l | grep -c '^[^#].*TonySwingETF/scripts/' || true)
+  [[ "$n" == "0" ]] && echo "노트북 크론 정지: TonySwingETF 라인 전부 주석 처리됨" \
+                    || echo "[WARN] 아직 활성 라인 $n 개 — crontab -e 로 직접 주석 처리"
+fi

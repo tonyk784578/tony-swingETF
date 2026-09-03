@@ -291,17 +291,17 @@ union 인덱스에 ffill하면 휴장일에 유령 0% 수익률이 생기므로 
   ② 국내 증권사 CME 크립토 선물 중개 개시 ③ 해외 파생 거래소 신고 수리.
   트리거 발생 시 xs 파이프라인 이식으로 단기 구축 가능 — 그때 사전 등록.
 
-## GPU 워크스테이션 이관 (2026-09-04 10:00 예정 — 절차 `MIGRATION.md`)
+## GPU 워크스테이션 이관 (2026-09-04 09:30 예정 — 사용자 절차 `MIGRATION.md` 4단계)
 
 - 이유: 크론 시각에 맞춰 노트북을 켜야 하는 유실 구조 → 항시 가동 기기로.
-  옮기는 것은 파일 + crontab 5줄(15:20 창 포함, `scripts/crontab.workstation`)뿐 —
-  코드·판정·장부 불변. 절대 경로 `/home/user/Project/TonySwingETF` 유지.
-- `scripts/pack_migration.sh`: .venv·캐시 제외 전체 tar.gz(~140MB, .env 포함 —
-  chmod 600, 클라우드 동기화 폴더 금지). **아침 프리뷰 완료 후 실행**(소급 불가
-  자산 포함 목적 — 스탬프 미충족 시 경고). `requirements.lock.txt`로 venv 재생성.
-- 이관 직후 노트북 크론 정지 필수 (동시 실행 = 장부 커밋 push 충돌 + KIS 토큰
-  상호 폐기). 워크스테이션 전제: TZ Asia/Seoul, git push 자격증명, Python 3.12.
-  Windows 알림은 powershell 부재 시 자동 무시(best-effort 설계).
+  옮기는 것은 압축본 하나 — 코드·판정·장부 불변.
+- 노트북: `scripts/pack_migration.sh --handoff` (.venv·캐시 제외 ~140MB, .env +
+  ~/.git-credentials 동봉 → 클라우드 동기화 폴더 금지, 노트북 크론 라인 자동 주석).
+  워크스테이션: 풀고 `scripts/install_workstation.sh` (TZ KST 강제, venv 재생성
+  `requirements.lock.txt`, git 신원·자격증명, pytest/verify, **당일 아침 프리뷰
+  미실행 시 이어받아 실행**, crontab 5줄을 실제 경로로 치환 등록 — 멱등).
+  경로가 달라져도 됨(스크립트가 치환). Windows 알림은 powershell 부재 시 자동 무시.
+- 두 기기 동시 실행 금지 이유: 같은 날짜 장부 커밋 push 충돌 + KIS 토큰 상호 폐기.
 
 ## 코드 리뷰 (2026-09-03 완료 — 08-26 이후 신규 코드 전체 + 보안 스윕)
 
