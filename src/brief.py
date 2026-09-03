@@ -20,6 +20,30 @@ from .health import ALERT_PATH, _notify_desktop, readiness_rows, regime_rows
 STATUS_PATH = ROOT_DIR / "STATUS.md"
 
 
+def slot_qty(code: str, price: float, capital: float | None = None,
+             exposure: float | None = None, leverage: dict | None = None
+             ) -> tuple[int, float, float]:
+    """슬롯 사이징 단일 공식 — (수량, 비중, 금액).
+
+    비중 = 노출 x 슬롯(1/3), 레버리지 ETF는 현금 1/lev. order_plan(STATUS 주문
+    계획)과 실행기(아침 매수·15:20 종가 매수)가 반드시 이 하나를 공유한다
+    (2026-09-03 리뷰 — 두 곳의 사본이 어긋나면 계획과 제출 수량이 갈라진다).
+    인자 생략 시 config ops/portfolio 값 사용.
+    """
+    cfg = load_config()
+    ops = cfg.get("ops", {})
+    if capital is None:
+        capital = ops.get("virtual_capital", 10_000_000)
+    if exposure is None:
+        exposure = ops.get("exposure", 0.5)
+    if leverage is None:
+        leverage = cfg.get("portfolio", {}).get("leverage", {})
+    lev = leverage.get(str(code), 1)
+    amount = capital * exposure / 3 / lev
+    qty = int(amount // price) if price > 0 else 0
+    return qty, exposure / 3 / lev, amount
+
+
 def order_plan(states: list[dict], capital: float, exposure: float,
                leverage: dict) -> list[dict]:
     """발동 신호 → 주문 계획. 비중 = 노출 x 슬롯(1/3) (승률 점수 중립 0.5 가정),
@@ -32,12 +56,11 @@ def order_plan(states: list[dict], capital: float, exposure: float,
             # volbreak/overnight — 포트폴리오 규칙 기반 환산 대상 아님 (별도
             # 슬리브, 1일 회전). 조건부 주문 정보는 상태 텍스트·전용 섹션이 담당
             continue
-        lev = leverage.get(str(st["cand"]["code"]), 1)
-        amount = capital * exposure / 3 / lev
-        qty = int(amount // st["last_close"]) if st["last_close"] > 0 else 0
+        qty, weight, amount = slot_qty(str(st["cand"]["code"]), st["last_close"],
+                                       capital, exposure, leverage)
         plans.append({"name": st["cand"]["name"], "strategy": st["cand"]["strategy"],
                       "code": str(st["cand"]["code"]),
-                      "price_ref": st["last_close"], "weight": exposure / 3 / lev,
+                      "price_ref": st["last_close"], "weight": weight,
                       "amount": amount, "qty": qty})
     return plans
 

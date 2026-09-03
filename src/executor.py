@@ -58,16 +58,6 @@ def _append_log(rows: list[dict]) -> None:
     log.to_csv(EXEC_LOG, index=False, encoding="utf-8-sig")
 
 
-def _slot_qty(code: str, price: float) -> tuple[int, float]:
-    """슬롯 사이징 (brief.order_plan 과 동일 환산): (수량, 비중)."""
-    cfg = load_config()
-    ops = cfg.get("ops", {})
-    lev = cfg.get("portfolio", {}).get("leverage", {}).get(str(code), 1)
-    amount = ops.get("virtual_capital", 10_000_000) * ops.get("exposure", 0.5) / 3 / lev
-    qty = int(amount // price) if price > 0 else 0
-    return qty, ops.get("exposure", 0.5) / 3 / lev
-
-
 def mock_positions(log: pd.DataFrame | None = None) -> dict[tuple[str, str], dict]:
     """exec_plan 라이프사이클로 본 실행기 보유 — {(code, strategy): {qty, name, date}}.
 
@@ -181,7 +171,26 @@ def run_trade(live_mock: bool = False, liquidate_legacy: bool = False,
         return
 
     # 매도(전일 1일 회전 청산)를 매수보다 먼저 — 예수금 확보 + 둘 다 시가 참여
-    plan = build_morning_sells() + build_plan()
+    sells = build_morning_sells()
+    if live_mock and sells:
+        # 잔고 대조 캡 (2026-09-03 리뷰): 라이프사이클 기록과 실제 잔고가
+        # 어긋나면(미체결·모의 서버 정합화 등) 기록 수량 매도가 실패를 반복하고,
+        # 고아 행이 합산 캡을 조용히 막는다 — 잔고만큼만 팔고 불일치는 표시.
+        # qty 0 이 되면 제출은 생략되고 계획 행만 남아 매일 눈에 띈다
+        try:
+            from .kis import KIS
+            avail = {h["code"]: h["qty"] for h in KIS().balance()["holdings"]}
+            for s in sells:
+                have = avail.get(s["code"], 0)
+                if have < s["qty"]:
+                    s["note"] += (f" [잔고 {have}주 != 기록 {s['qty']}주 — "
+                                  "잔고만큼만, 고아 라이프사이클 의심]")
+                    s["qty"] = have
+                avail[s["code"]] = have - s["qty"]
+        except Exception as e:   # noqa: BLE001 — 조회 실패 시 기록 수량으로 진행
+            print(f"[warn] 잔고 조회 실패 — 기록 수량으로 매도 제출: {e}",
+                  file=sys.stderr)
+    plan = sells + build_plan()
     print(f"=== Phase D 실행기 ({mode}) — 오늘 계획 {len(plan)}건 ===")
     _submit_plan(plan, today, now, mode, live_mock)
 
@@ -254,10 +263,12 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
     today = pd.Timestamp.today().normalize() if today is None else today
     kis = KIS()
 
-    # 오늘 밤 보유 예정 코드 (합산 캡 판정용): 현재 실행기 보유 + 이 창의 매수
+    # 오늘 밤 보유 예정 코드 (합산 캡 판정용): 현재 실행기 보유 + 이 창의 매수.
+    # 라이프사이클은 한 번만 읽어 이 실행 내내 재사용 (일관성 + CSV 반복 로드 방지)
     cap = int(cfg.get("ops", {}).get("same_code_slot_cap", 1))
+    held = mock_positions()
     night_codes: dict[str, int] = {}
-    for (code, _s), _p in mock_positions().items():
+    for (code, _s), _p in held.items():
         night_codes[code] = night_codes.get(code, 0) + 1
 
     quotes: dict[str, dict] = {}
@@ -318,7 +329,9 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
                             "note": f"진입 신호 발동 — 동일 ETF 합산 캡({cap}슬롯)으로"
                                     " 매수 생략 (섀도 장부는 기록됨)"})
                 continue
-            qty, weight = _slot_qty(code, q["price"])
+            from .brief import slot_qty
+
+            qty, weight, _amount = slot_qty(code, q["price"])
             night_codes[code] = night_codes.get(code, 0) + 1
             fill = after["entry_price"]
             out.append({"action": "buy_close", "code": code, "name": cand["name"],
@@ -326,7 +339,7 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
                         "note": f"종가 매수 (비중 {weight:.1%}, 모형 체결가 "
                                 f"{fill:,.0f} — 실체결과의 차이가 슬리피지 실측)"})
         elif action == "sell":
-            pos = mock_positions().get((code, strategy))
+            pos = held.get((code, strategy))
             if pos is None:
                 out.append({"action": "plan_only", "code": code,
                             "name": cand["name"], "strategy": strategy, "qty": 0,
@@ -349,6 +362,21 @@ def run_close_window(live_mock: bool = False, auto: bool = False) -> None:
         if not (start <= hhmm < end):
             print(f"실행 창({start}~{end}) 밖({hhmm}) — 스킵 (창을 놓친 날은 "
                   "모의 제출만 빠지고 섀도 장부는 영향 없음)")
+            return
+        # 신선도 가드 (2026-09-03 리뷰): 아침 실행이 유실된 날은 캐시가 D-2에
+        # 멈춰 있을 수 있다 — 그 위에 잠정 봉을 붙이면 volbreak 트리거가
+        # 전전일 변동폭으로, 이평이 하루 밀려 계산된다. 아침 성공 스탬프
+        # (.morning_done == 오늘, 다운로드 성공 후에만 찍힘)를 신선도 증명으로
+        # 쓰고, 없으면 창을 건너뛴다 (실패 안전 — 섀도 장부는 무영향)
+        stamp = ROOT_DIR / "paper" / "logs" / ".morning_done"
+        today_str = pd.Timestamp.today().strftime("%Y-%m-%d")
+        try:
+            fresh = stamp.read_text().strip() == today_str
+        except OSError:
+            fresh = False
+        if not fresh:
+            print("[warn] 아침 실행 스탬프 없음 — 캐시 신선도 미보장 → 창 스킵 "
+                  "(전일 봉 누락 시 트리거·이평 오계산 방지)")
             return
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
     now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
