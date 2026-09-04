@@ -63,7 +63,7 @@ echo "== 6/7 오늘 아침 프리뷰 =="
 TODAY="$(date +%F)"
 if [[ "$(cat paper/logs/.morning_done 2>/dev/null || true)" == "$TODAY" ]]; then
   ok "노트북에서 이미 완료 ($TODAY)"
-elif [[ $(date +%u) -le 5 && $(date +%H) -lt 16 ]]; then
+elif [[ $(date +%u) -le 5 && 10#$(date +%H) -lt 16 ]]; then
   echo "  노트북이 못 받은 오늘치 아침 프리뷰를 지금 기록합니다 (개장 후면 late 플래그 — 정상)."
   scripts/run_morning_catchup.sh && ok "아침 프리뷰 기록 완료" || warn "아침 프리뷰 실패 — tail paper/logs/$TODAY.log"
 else
