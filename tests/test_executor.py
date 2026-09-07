@@ -7,7 +7,12 @@
 import pandas as pd
 
 from src.etf_swing import simulate, simulate_overnight, simulate_volbreak
-from src.executor import _close_action, mock_positions
+from src.executor import (
+    _close_action,
+    _order_paced,
+    build_morning_sells,
+    mock_positions,
+)
 
 TODAY = pd.Timestamp("2026-09-03")
 
@@ -113,3 +118,56 @@ def test_mock_positions_lifecycle():
     assert pos[("132030", "tom")]["qty"] == 54
     assert ("122630", "volbreak") not in pos
     assert ("069500", "breakout") not in pos
+
+
+def test_morning_sells_catchup_orphan_swing():
+    """15:20 창을 놓쳐 섀도는 청산됐는데 라이프사이클엔 남은 스윙 보유 →
+    다음 아침 캐치업 매도. 섀도가 아직 보유 중이면 건드리지 않고, 1일 회전
+    계열은 섀도 상태와 무관하게 항상 시가 매도. legacy('-')는 대상 아님."""
+    held = {
+        ("132030", "tom"): {"qty": 54, "name": "KODEX_Gold", "date": "2026-09-01"},
+        ("069500", "breakout"): {"qty": 30, "name": "KODEX200", "date": "2026-09-02"},
+        ("091160", "overnight"): {"qty": 11, "name": "Semicon", "date": "2026-09-04"},
+        ("139660", "-"): {"qty": 34, "name": "legacy", "date": "2026-08-26"},
+    }
+    shadow_open = {("069500", "breakout")}   # 섀도가 아직 보유 중인 것만
+    sells = build_morning_sells(shadow_open=shadow_open, held=held)
+    by_key = {(s["code"], s["strategy"]): s for s in sells}
+    assert by_key[("132030", "tom")]["qty"] == 54
+    assert "캐치업" in by_key[("132030", "tom")]["note"]
+    assert by_key[("091160", "overnight")]["action"] == "sell_open"
+    assert ("069500", "breakout") not in by_key
+    assert ("139660", "-") not in by_key
+
+
+def test_order_paced_retries_rate_limit_once(monkeypatch):
+    """EGW00201 은 1회만 재시도, 그 외 오류는 즉시 전파, 성공은 그대로 반환."""
+    monkeypatch.setattr("time.sleep", lambda _s: None)   # 간격 대기 생략
+
+    class Flaky:
+        def __init__(self, errors):
+            self.errors, self.calls = list(errors), 0
+
+        def order_cash(self, code, qty, side):
+            self.calls += 1
+            if self.errors:
+                raise RuntimeError(self.errors.pop(0))
+            return {"ODNO": "0001"}
+
+    k = Flaky(["KIS 오류 500/EGW00201: 초당 거래건수 초과"])
+    assert _order_paced(k, "102970", 75, "sell")["ODNO"] == "0001"
+    assert k.calls == 2
+
+    k = Flaky(["EGW00201", "EGW00201"])
+    try:
+        _order_paced(k, "102970", 75, "sell")
+        raise AssertionError("두 번째 리밋은 전파돼야 한다")
+    except RuntimeError as e:
+        assert "EGW00201" in str(e) and k.calls == 2
+
+    k = Flaky(["40240000 잔고내역이 없습니다"])
+    try:
+        _order_paced(k, "102970", 75, "sell")
+        raise AssertionError("리밋 외 오류는 재시도 없이 전파")
+    except RuntimeError:
+        assert k.calls == 1

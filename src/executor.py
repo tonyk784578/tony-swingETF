@@ -7,7 +7,8 @@ fillcheck 가 된다. 신호·판정 기준 불변, 이 모듈은 소비자일 �
 범위 (v2 — 2026-09-02 15:20 실행 창 추가):
 - **아침 창** (`trade --auto`, 개장 전): 시가 진입 계열(trend/tom) 시장가 매수
   (수량은 brief.order_plan 과 동일 환산) + **1일 회전 계열(volbreak/overnight)
-  전일 종가 매수분의 시가 매도** (개장 전 시장가 제출 = 시가 동시호가 참여).
+  전일 종가 매수분의 시가 매도** (개장 전 시장가 제출 = 시가 동시호가 참여)
+  + 15:20 창을 놓쳐 남은 스윙 보유의 캐치업 시가 매도 (섀도 무포지션 대조).
 - **15:20 창** (`trade --auto --close-window`, 마감 동시호가 직전): 현재가
   API로 잠정 당일 봉(시가/고가/저가/현재가)을 만들어 **동결 엔진에 그대로
   넣고** 확정 리플레이와의 차이로 진입/청산을 판정한다 — 신호 재구현 금지
@@ -56,6 +57,27 @@ def _append_log(rows: list[dict]) -> None:
     log = pd.concat([_load_log(), pd.DataFrame(rows)], ignore_index=True)
     EXEC_LOG.parent.mkdir(exist_ok=True)
     log.to_csv(EXEC_LOG, index=False, encoding="utf-8-sig")
+
+
+# 모의 레이트리밋 (2026-09-02 시세, 2026-09-07 주문 실측): 명목 초당 2건이지만
+# 0.6s 간격에도 EGW00201 — 주문은 hashkey+order 2호출이라 더 빡빡하다.
+# 시세·주문 공통 1.1s 간격 + 리밋 1회 재시도.
+_KIS_GAP = 1.1
+
+
+def _order_paced(kis, code: str, qty: int, side: str) -> dict:
+    """레이트리밋 간격 + EGW00201 1회 재시도로 현금 주문 (아침·15:20·legacy 공용)."""
+    import time
+
+    for attempt in (1, 2):
+        time.sleep(_KIS_GAP)
+        try:
+            return kis.order_cash(code, qty, side)
+        except Exception as e:   # noqa: BLE001 — 리밋만 1회 재시도, 나머지는 즉시 전파
+            if "EGW00201" in str(e) and attempt == 1:
+                continue
+            raise
+    raise RuntimeError("unreachable")
 
 
 def mock_positions(log: pd.DataFrame | None = None) -> dict[tuple[str, str], dict]:
@@ -138,18 +160,38 @@ def build_plan() -> list[dict]:
     return out
 
 
-def build_morning_sells() -> list[dict]:
-    """1일 회전 계열(volbreak/overnight)의 전일 종가 매수분 → 오늘 시가 매도.
+def build_morning_sells(shadow_open: set[tuple[str, str]] | None = None,
+                        held: dict | None = None) -> list[dict]:
+    """아침 매도 계획 — 1일 회전 청산 + 놓친 스윙 청산 캐치업.
 
-    개장 전 시장가 매도 제출 = 시가 동시호가 참여 — 엔진의 '익일 시가 청산'
-    가정과 정합. swing 청산(종가)은 15:20 창 담당이라 여기 없다.
+    - 1일 회전 계열(volbreak/overnight)의 전일 종가 매수분 → 오늘 시가 매도.
+      개장 전 시장가 매도 제출 = 시가 동시호가 참여 — 엔진의 '익일 시가 청산'
+      가정과 정합. swing 청산(종가)은 15:20 창 담당이라 정상 경로는 여기 없다.
+    - **캐치업 (2026-09-07)**: 15:20 창을 통째로 놓친 날(크론 미등록·다운)의
+      스윙 청산은 `_close_action` 이 청산 당일에만 감지하므로 영원히 재시도되지
+      않는다 (09-03 KODEX_Gold tom 청산 유실 → 모의계좌 고아 보유 실측).
+      라이프사이클은 보유인데 섀도(shadow_open)는 무포지션인 스윙 포지션을
+      다음 아침 시가에 판다 — 하루 늦은 체결이라 슬리피지 실측엔 못 쓰지만
+      고아 보유가 합산 캡·다음 진입 추적을 조용히 망가뜨리는 경로를 막는다.
+      shadow_open=None 이면 섀도 상태를 직접 조회한다.
     """
+    held = mock_positions() if held is None else held
+    if shadow_open is None:
+        from .etf_paper import candidate_states
+
+        shadow_open = {(str(st["cand"]["code"]), st["cand"]["strategy"])
+                       for st in candidate_states(force=False) if st["open_pos"]}
     out = []
-    for (code, strategy), p in mock_positions().items():
+    for (code, strategy), p in held.items():
         if strategy in ("volbreak", "overnight"):
             out.append({"action": "sell_open", "code": code, "name": p["name"],
                         "strategy": strategy, "qty": p["qty"],
                         "note": f"1일 회전 청산 — 시가 매도 (진입 {p['date']})"})
+        elif strategy != "-" and (code, strategy) not in shadow_open:
+            out.append({"action": "sell_open", "code": code, "name": p["name"],
+                        "strategy": strategy, "qty": p["qty"],
+                        "note": f"놓친 종가 청산 캐치업 — 시가 매도 (진입 {p['date']}, "
+                                "섀도는 이미 청산 — 15:20 창 유실 자기교정)"})
     return out
 
 
@@ -216,14 +258,11 @@ def _submit_plan(plan: list[dict], today: str, now: str, mode: str,
             if (p["name"], p["strategy"], p["action"]) in submitted_today:
                 line += " (오늘 이미 제출 — 스킵)"
             else:
-                import time
-
                 from .kis import KIS
                 kis = kis or KIS()
                 side = "buy" if p["action"].startswith("buy") else "sell"
                 try:
-                    time.sleep(0.6)   # 모의 레이트리밋 초당 2건 방어
-                    res = kis.order_cash(p["code"], int(p["qty"]), side)
+                    res = _order_paced(kis, p["code"], int(p["qty"]), side)
                     order_no = res.get("ODNO", "")
                     line += f" → 제출 odno={order_no}"
                 except Exception as e:   # noqa: BLE001 — 주문 실패는 기록하고 계속
@@ -279,12 +318,11 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
         if df.index[-1] >= today:
             continue   # 오늘 봉이 이미 확정(16시 이후 실행) — 잠정 봉 불필요·무해
         if code not in quotes:
-            # 모의 레이트리밋: 명목 초당 2건이지만 0.6s 간격에도 EGW00201 실측
-            # (2026-09-02) — 1.1s 간격 + 리밋 1회 재시도. 9종 x 1.1s ≈ 10s 로
+            # 레이트리밋 간격은 _KIS_GAP (주문 경로와 동일). 9종 x 1.1s ≈ 10s 로
             # 15:20 창 안에 충분하다
             for attempt in (1, 2):
                 try:
-                    time.sleep(1.1)
+                    time.sleep(_KIS_GAP)
                     quotes[code] = kis.quote(code)
                     break
                 except Exception as e:   # noqa: BLE001 — 종목별 독립 실패 처리
@@ -392,8 +430,6 @@ def _liquidate_legacy(today: str, now: str) -> None:
     잔고 전체를 팔면 실행기가 나중에 연 포지션까지 청산하는 사고가 되므로,
     이관 시점에 동결한 목록으로 대상을 한정한다.
     """
-    import time
-
     from .kis import KIS
 
     legacy = set(load_config().get("ops", {}).get("legacy_codes", []))
@@ -405,9 +441,8 @@ def _liquidate_legacy(today: str, now: str) -> None:
     print(f"=== 잔여 보유 청산 — 대상 {len(targets)}종목 (동결 목록 {len(legacy)}건 한정) ===")
     rows = []
     for h in targets:
-        time.sleep(0.6)   # 모의 레이트리밋 초당 2건(EGW00201) 방어
         try:
-            res = kis.order_cash(h["code"], h["qty"], "sell")
+            res = _order_paced(kis, h["code"], h["qty"], "sell")
             odno = res.get("ODNO", "")
             print(f"  매도 {h['name']} x{h['qty']} → odno={odno}")
         except Exception as e:   # noqa: BLE001
