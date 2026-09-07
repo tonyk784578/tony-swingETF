@@ -127,16 +127,27 @@ def test_morning_sells_catchup_orphan_swing():
     held = {
         ("132030", "tom"): {"qty": 54, "name": "KODEX_Gold", "date": "2026-09-01"},
         ("069500", "breakout"): {"qty": 30, "name": "KODEX200", "date": "2026-09-02"},
+        ("133690", "trend_ride"): {"qty": 7, "name": "NDX", "date": "2026-09-04"},
         ("091160", "overnight"): {"qty": 11, "name": "Semicon", "date": "2026-09-04"},
         ("139660", "-"): {"qty": 34, "name": "legacy", "date": "2026-08-26"},
+        ("148070", "trend_ride"): {"qty": 5, "name": "KTB", "date": "2026-08-20"},
     }
-    shadow_open = {("069500", "breakout")}   # 섀도가 아직 보유 중인 것만
-    sells = build_morning_sells(shadow_open=shadow_open, held=held)
+    d = pd.Timestamp("2026-09-04")
+    shadow = {
+        ("132030", "tom"): {"open": False, "last_date": d},        # 청산 유실 → 캐치업
+        ("069500", "breakout"): {"open": True, "last_date": d},    # 섀도 보유 중 → 보류
+        # 캐시가 진입일(09-04) 이전에 멈춤 → 섀도가 아직 못 본 진입 → 보류
+        ("133690", "trend_ride"): {"open": False, "last_date": pd.Timestamp("2026-09-03")},
+        # ("148070","trend_ride") 는 후보 목록에 없음 → 섀도 추적 없음 → 캐치업
+    }
+    sells = build_morning_sells(shadow=shadow, held=held)
     by_key = {(s["code"], s["strategy"]): s for s in sells}
     assert by_key[("132030", "tom")]["qty"] == 54
     assert "캐치업" in by_key[("132030", "tom")]["note"]
     assert by_key[("091160", "overnight")]["action"] == "sell_open"
+    assert by_key[("148070", "trend_ride")]["qty"] == 5
     assert ("069500", "breakout") not in by_key
+    assert ("133690", "trend_ride") not in by_key
     assert ("139660", "-") not in by_key
 
 

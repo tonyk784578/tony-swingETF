@@ -160,7 +160,7 @@ def build_plan() -> list[dict]:
     return out
 
 
-def build_morning_sells(shadow_open: set[tuple[str, str]] | None = None,
+def build_morning_sells(shadow: dict[tuple[str, str], dict] | None = None,
                         held: dict | None = None) -> list[dict]:
     """아침 매도 계획 — 1일 회전 청산 + 놓친 스윙 청산 캐치업.
 
@@ -170,28 +170,39 @@ def build_morning_sells(shadow_open: set[tuple[str, str]] | None = None,
     - **캐치업 (2026-09-07)**: 15:20 창을 통째로 놓친 날(크론 미등록·다운)의
       스윙 청산은 `_close_action` 이 청산 당일에만 감지하므로 영원히 재시도되지
       않는다 (09-03 KODEX_Gold tom 청산 유실 → 모의계좌 고아 보유 실측).
-      라이프사이클은 보유인데 섀도(shadow_open)는 무포지션인 스윙 포지션을
-      다음 아침 시가에 판다 — 하루 늦은 체결이라 슬리피지 실측엔 못 쓰지만
-      고아 보유가 합산 캡·다음 진입 추적을 조용히 망가뜨리는 경로를 막는다.
-      shadow_open=None 이면 섀도 상태를 직접 조회한다.
+      라이프사이클은 보유인데 섀도는 무포지션인 스윙 포지션을 다음 아침
+      시가에 판다 — 하루 늦은 체결이라 슬리피지 실측엔 못 쓰지만 고아 보유가
+      합산 캡·다음 진입 추적을 조용히 망가뜨리는 경로를 막는다.
+      **스테일 가드**: 섀도의 마지막 확정 봉이 진입일보다 앞이면(다운로드
+      실패로 캐시가 뒤처진 아침) 섀도가 그 진입을 아직 못 본 것이라 판단 보류.
+      후보 목록에서 빠진 (code, strategy)는 섀도 추적이 없으므로 판다.
+      shadow: {(code, strategy): {"open": bool, "last_date": Timestamp}} —
+      None 이면 candidate_states 로 직접 만든다.
     """
     held = mock_positions() if held is None else held
-    if shadow_open is None:
+    if shadow is None:
         from .etf_paper import candidate_states
 
-        shadow_open = {(str(st["cand"]["code"]), st["cand"]["strategy"])
-                       for st in candidate_states(force=False) if st["open_pos"]}
+        shadow = {(str(st["cand"]["code"]), st["cand"]["strategy"]):
+                  {"open": bool(st["open_pos"]), "last_date": st["last_date"]}
+                  for st in candidate_states(force=False)}
     out = []
     for (code, strategy), p in held.items():
         if strategy in ("volbreak", "overnight"):
             out.append({"action": "sell_open", "code": code, "name": p["name"],
                         "strategy": strategy, "qty": p["qty"],
                         "note": f"1일 회전 청산 — 시가 매도 (진입 {p['date']})"})
-        elif strategy != "-" and (code, strategy) not in shadow_open:
-            out.append({"action": "sell_open", "code": code, "name": p["name"],
-                        "strategy": strategy, "qty": p["qty"],
-                        "note": f"놓친 종가 청산 캐치업 — 시가 매도 (진입 {p['date']}, "
-                                "섀도는 이미 청산 — 15:20 창 유실 자기교정)"})
+            continue
+        if strategy == "-":
+            continue   # legacy 잔여물 — --liquidate-legacy 전용
+        sh = shadow.get((code, strategy))
+        if sh is not None and (sh["open"]
+                               or pd.Timestamp(sh["last_date"]) < pd.Timestamp(p["date"])):
+            continue   # 섀도 보유 중 / 캐시가 진입일 이전에 멈춤 → 보류
+        out.append({"action": "sell_open", "code": code, "name": p["name"],
+                    "strategy": strategy, "qty": p["qty"],
+                    "note": f"놓친 종가 청산 캐치업 — 시가 매도 (진입 {p['date']}, "
+                            "섀도는 이미 청산 — 15:20 창 유실 자기교정)"})
     return out
 
 
