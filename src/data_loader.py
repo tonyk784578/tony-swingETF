@@ -111,6 +111,26 @@ def _fetch_us(symbol: str, start: str) -> pd.DataFrame:
     return df
 
 
+def classify_revision(old_close: pd.Series, new_close: pd.Series,
+                      tol: float = 2e-4) -> dict:
+    """정정 패턴 분류 — 균일 배율(분배락 소급 조정)인지, 산발 정정인지.
+
+    균일 조건: 변한 행의 new/old 배율 산포(최대-최소)가 tol 이내 AND 변한 행이
+    시간순으로 앞쪽에 몰려 있고(경계 이후 행은 불변) 그 경계가 하나.
+    반환: {uniform, factor, boundary}.
+    """
+    ratio = (new_close / old_close).dropna()
+    moved = ratio[(ratio - 1).abs() > 0.001]
+    if moved.empty:
+        return {"uniform": False, "factor": 1.0, "boundary": None}
+    boundary = moved.index.max()
+    before = ratio[ratio.index <= boundary]
+    spread = float(before.max() - before.min())
+    uniform = spread <= tol and len(before) == len(moved)
+    return {"uniform": bool(uniform), "factor": float(moved.median()),
+            "boundary": boundary.date() if hasattr(boundary, "date") else boundary}
+
+
 def _check_revisions(symbol: str, old: pd.DataFrame, new: pd.DataFrame) -> None:
     """과거 데이터가 소리 없이 바뀌었는지 감시 (액면분할·데이터 정정 등).
 
@@ -129,9 +149,18 @@ def _check_revisions(symbol: str, old: pd.DataFrame, new: pd.DataFrame) -> None:
     if changed.empty:
         return
     first, last = changed.index.min().date(), changed.index.max().date()
-    msg = (f"[REVISION] {symbol}: {len(changed)} past rows changed "
-           f"(max {changed.max():.2%}, range {first}~{last}) — "
-           f"백테스트/장부 재검토 필요 (액면분할·데이터 정정 의심)")
+    kind = classify_revision(old.loc[common, "Close"], new.loc[common, "Close"])
+    if kind["uniform"]:
+        # 분배락 소급 조정 (2026-09-09 규명): FDR 일봉은 분배금 조정가라 분배락마다
+        # 이전 전 구간이 (1 - 분배수익률) 배율로 일괄 재조정된다. 수익률·신호는
+        # 배율 불변(경계 하루만 미세 영향)이라 재검토 대상이 아니다 — 정보성.
+        msg = (f"[REVISION-ADJ] {symbol}: {len(changed)} past rows rescaled "
+               f"(uniform x{kind['factor']:.5f} = {kind['factor'] - 1:+.2%}, "
+               f"through {kind['boundary']}) — 분배락 소급 조정 추정 (신호 불변)")
+    else:
+        msg = (f"[REVISION] {symbol}: {len(changed)} past rows changed "
+               f"(max {changed.max():.2%}, range {first}~{last}) — "
+               f"백테스트/장부 재검토 필요 (액면분할·데이터 정정 의심)")
     print(msg, file=sys.stderr)
     with open(DATA_DIR / "revisions.log", "a", encoding="utf-8") as f:
         f.write(f"{pd.Timestamp.now():%F %T} {msg}\n")

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 
+import numpy as np
 import pandas as pd
 
 from .config import DATA_DIR, load_config
@@ -87,6 +88,35 @@ def collect_minute() -> pd.DataFrame:
             print(f"[warn] minute download failed for {code} ({e}); keeping cache",
                   file=sys.stderr)
     return result
+
+
+def align_minute_to_daily(minute: pd.DataFrame, daily: pd.DataFrame) -> pd.DataFrame:
+    """분봉(yfinance 원가격)을 일봉(FDR 분배금 조정가) 기준으로 배율 정렬.
+
+    2026-09-09 실측: FDR 일봉은 전 구간 분배금 조정가라 분배락 이전 날짜의 가격이
+    원가격보다 분배수익률만큼 낮다 (KODEX_Securities 0.85%, KODEX_Auto 0.58%,
+    KODEX200 0.20% — 07-30 분배락 이전 구간). 분봉은 원가격이므로 두 소스를 그대로
+    섞으면 그 차이가 '슬리피지'나 '수익'으로 둔갑한다 — 측정 대상(0.05~0.2%)보다
+    크다. 날짜별 배율 = 일봉 시가 / 그날 첫 분봉 시가 (둘 다 09:00 동시호가 체결가
+    — 같은 체결의 두 기록이라 정확). 첫 봉이 09:00이 아니거나 배율이 비정상
+    (±5% 밖)이면 그날은 배율 1 (정렬 안 함 — 조용히 틀리느니 원값).
+    """
+    if minute.empty or daily.empty:
+        return minute
+    idx = pd.DatetimeIndex(minute.index)
+    day = idx.normalize()
+    first = minute.groupby(day).head(1)
+    first_day = pd.DatetimeIndex(first.index).normalize()
+    at_open = pd.DatetimeIndex(first.index).time == pd.Timestamp("09:00").time()
+    d_open = daily["Open"].reindex(first_day).to_numpy()
+    ratio = d_open / first["Open"].to_numpy()
+    ok = at_open & np.isfinite(ratio) & (np.abs(ratio - 1) < 0.05)
+    factor = pd.Series(np.where(ok, ratio, 1.0), index=first_day)
+    f = factor.reindex(day).fillna(1.0).to_numpy()
+    out = minute.copy()
+    for c in ("Open", "High", "Low", "Close"):
+        out[c] = out[c].to_numpy() * f
+    return out
 
 
 def coverage(minute: pd.DataFrame) -> pd.DatetimeIndex:

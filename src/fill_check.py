@@ -9,6 +9,11 @@
 두 체결가로 각각 수익률을 재계산해 차이(슬리피지 상한 추정)를 보고한다.
 분봉은 60일 한도라 매일 축적 중 (minute 단계) — 표본은 시간이 갈수록 늘어난다.
 
+**가격 기준 정렬 (2026-09-09 정정)**: FDR 일봉은 분배금 조정가, yfinance 분봉은
+원가격이다. 분배락 이전 날짜에서 두 소스는 분배수익률만큼 어긋나므로
+`align_minute_to_daily`로 분봉을 일봉 배율에 맞춘 뒤 비교한다. 정렬 전 수치는
+KODEX_Securities·KODEX_Auto에서 슬리피지가 0.58~0.85%p 과대 추정돼 있었다.
+
 **탈락 건수를 반드시 표시한다** (2026-08-14 추가): 일봉상 트리거 도달인데 분봉에
 도달 봉이 없으면 그 날은 표본에서 빠진다. 원인은 소스가 마감 30분(15:00~15:30)을
 주지 않는 것 — 늦게 터진 돌파가 통째로 빠지므로 **표본이 장 초반 돌파 쪽으로
@@ -23,7 +28,7 @@ import pandas as pd
 
 from .config import RESULTS_DIR, load_config
 from .data_loader import confirmed_cutoff, load_symbol
-from .minute_data import intraday_window, load_volbreak_minute
+from .minute_data import align_minute_to_daily, intraday_window, load_volbreak_minute
 
 
 def _day_fills(daily: pd.DataFrame, minute: pd.DataFrame, k: float
@@ -83,6 +88,9 @@ def run_fill_check() -> None:
         window = window or intraday_window(minute)
         daily = load_symbol(code, "kr")
         daily = daily[daily.index <= cut]
+        # 분봉(원가격)을 일봉(분배금 조정가) 배율로 정렬 — 2026-09-09 정정. 정렬
+        # 없이는 분배락 이전 구간에서 분배수익률(0.2~0.85%)이 슬리피지로 잡힌다
+        minute = align_minute_to_daily(minute, daily)
         f = _day_fills(daily, minute, k)
         drop = int(f["cons_fill"].isna().sum()) if len(f) else 0
         n_hit += len(f)

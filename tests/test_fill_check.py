@@ -8,7 +8,7 @@
 import pandas as pd
 
 from src.fill_check import _day_fills
-from src.minute_data import intraday_window
+from src.minute_data import align_minute_to_daily, intraday_window
 
 
 def _daily(highs, opens=None, closes=None):
@@ -91,3 +91,32 @@ def test_intraday_window_reports_actual_covered_span():
 def test_intraday_window_handles_empty_input():
     w = intraday_window(pd.DataFrame())
     assert w["days"] == 0 and w["first"] is None
+
+
+# ------------------------------------------------------------- 가격 기준 정렬
+
+def test_align_minute_rescales_by_open_ratio_per_day():
+    """분봉(원가격)을 일봉(분배금 조정가) 배율로 맞춘다 — 날짜별 시가 비율.
+
+    2026-09-09 실측: 분배락 이전 날짜의 FDR 일봉이 원가격보다 분배수익률만큼 낮아
+    정렬 없이는 그 차이가 슬리피지로 잡혔다 (KODEX_Securities 0.85%p).
+    """
+    daily = _daily([100.0, 100.0], opens=[99.0, 100.0])          # 첫날은 조정가(1% 낮음)
+    minute = pd.concat([
+        _bars("2026-06-01", ["09:00", "09:05"], [101.0, 102.0], opens=[100.0, 100.0]),
+        _bars("2026-06-02", ["09:00"], [101.0], opens=[100.0]),
+    ])
+    a = align_minute_to_daily(minute, daily)
+    assert abs(a.loc["2026-06-01 09:05", "High"] - 102.0 * 0.99) < 1e-9
+    assert a.loc["2026-06-02 09:00", "High"] == 101.0               # 배율 1 (일치)
+    assert (minute["High"] == [101.0, 102.0, 101.0]).all()           # 원본 불변
+
+
+def test_align_minute_leaves_day_alone_when_first_bar_is_not_open_or_ratio_wild():
+    daily = _daily([100.0, 100.0], opens=[50.0, 100.0])           # 50% 차이 = 비정상
+    minute = pd.concat([
+        _bars("2026-06-01", ["09:00"], [101.0], opens=[100.0]),
+        _bars("2026-06-02", ["09:10"], [101.0], opens=[100.0]),     # 첫 봉이 09:10
+    ])
+    a = align_minute_to_daily(minute, daily)
+    assert (a["High"] == minute["High"]).all()

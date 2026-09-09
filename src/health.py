@@ -156,9 +156,15 @@ def check_revisions() -> bool:
     lines = path.read_text(encoding="utf-8").strip().splitlines()
     recent = [ln for ln in lines
               if pd.Timestamp(ln[:10]) >= pd.Timestamp.today() - pd.Timedelta(days=window)]
-    if recent:
-        return _warn(f"최근 7일 내 데이터 정정 {len(recent)}건 — 백테스트/장부 재검토 필요 "
+    # [REVISION-ADJ] = 분배락 소급 조정 (FDR 조정가 — 2026-09-09 규명): 배율 불변이라
+    # 신호·장부 재검토 대상이 아님 → 정보성으로만 표시, 경고 아님
+    adj = [ln for ln in recent if "[REVISION-ADJ]" in ln]
+    hard = [ln for ln in recent if "[REVISION-ADJ]" not in ln]
+    if hard:
+        return _warn(f"최근 7일 내 데이터 정정 {len(hard)}건 — 백테스트/장부 재검토 필요 "
                      f"(data/revisions.log)")
+    if adj:
+        return _ok(f"최근 데이터 정정 없음 (분배락 소급 조정 {len(adj)}건 — 신호 불변)")
     return _ok("최근 데이터 정정 없음")
 
 
