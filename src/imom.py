@@ -140,7 +140,7 @@ def run_imom() -> None:
         if minute.empty:
             print(f"  {name:12} 분봉 없음")
             continue
-        table = day_table(align_minute_to_daily(minute, daily), daily,
+        table = day_table(daily, align_minute_to_daily(minute, daily),
                           icfg["signal_bar"], icfg["entry_bar"])
         table = table[table.index <= cut]
         pilot = table[(table.index >= start) & (table.index <= freeze)]

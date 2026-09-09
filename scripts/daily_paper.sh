@@ -45,8 +45,6 @@ case "${1:-evening}" in
       "$PY" -m src.main download --force
       "$PY" -m src.main minute
       "$PY" -m src.main paper
-      # imom 장중 모멘텀 섀도 (2026-09-09 등록): 분봉으로 완결되는 포워드 장부
-      "$PY" -m src.main imom || echo "[WARN] imom step failed"
       # 통합 슬리브 뷰 갱신 (2026-08-26): 중복 보유·슬리브 상관 일일 기록
       "$PY" -m src.main sleeves || echo "[WARN] sleeves step failed"
       "$PY" -m src.main health
