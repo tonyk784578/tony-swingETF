@@ -289,14 +289,35 @@ def _submit_plan(plan: list[dict], today: str, now: str, mode: str,
         print("(dry-run — 주문 미제출. 제출은 --live-mock. 실계좌 경로는 코드에 없음)")
 
 
-def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
+def _fetch_quote(kis, code: str, name: str, timeout: float) -> dict:
+    """15:20 창 시세 1건 — 레이트리밋(EGW00201)만 1회 재시도, 그 외 실패는 즉시 {}.
+
+    2026-09-08 결함: 재시도 루프에 탈출이 없어 타임아웃도 두 번 호출됐다
+    (종목당 30s+ → 10종이면 창 초과, 슬롯 겹침). 실패 종목은 건너뛰되 호출자가
+    실패 목록으로 비정상 종료 여부를 정한다.
+    """
+    import time
+
+    for attempt in (1, 2):
+        try:
+            time.sleep(_KIS_GAP)
+            return kis.quote(code, timeout=timeout)
+        except Exception as e:   # noqa: BLE001 — 종목별 독립 실패 처리
+            if "EGW00201" in str(e) and attempt == 1:
+                continue
+            print(f"  [WARN] {name} 시세 실패 — 건너뜀: {e}", file=sys.stderr)
+            return {}
+    return {}
+
+
+def build_close_plan(today: pd.Timestamp | None = None) -> tuple[list[dict], list[str]]:
     """15:20 실행 창 계획 — 잠정 당일 봉을 동결 엔진에 넣어 진입/청산 차분.
 
     시세 조회가 필요하므로 dry-run 이어도 KIS 를 쓴다 (조회 전용 — 주문 없음).
     종목별 독립 실패 처리 (minute 수집 관례): 시세 실패 종목은 건너뛰고 기록.
+    반환: (계획, 시세 실패 종목명 목록) — 실패가 있으면 호출자가 비정상 종료해
+    다음 슬롯이 재시도한다 (당일 중복 제출은 _submit_plan 이 차단).
     """
-    import time
-
     from .data_loader import confirmed_cutoff
     from .etf_swing import (
         candidate_flags,
@@ -316,12 +337,14 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
     # 오늘 밤 보유 예정 코드 (합산 캡 판정용): 현재 실행기 보유 + 이 창의 매수.
     # 라이프사이클은 한 번만 읽어 이 실행 내내 재사용 (일관성 + CSV 반복 로드 방지)
     cap = int(cfg.get("ops", {}).get("same_code_slot_cap", 1))
+    quote_timeout = float(cfg.get("ops", {}).get("close_quote_timeout", 5))
     held = mock_positions()
     night_codes: dict[str, int] = {}
     for (code, _s), _p in held.items():
         night_codes[code] = night_codes.get(code, 0) + 1
 
     quotes: dict[str, dict] = {}
+    failed: list[str] = []
     out = []
     for cand, df, entry, exit_, max_hold, trailing in iter_candidates(
             cutoff=confirmed_cutoff()):
@@ -329,19 +352,9 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
         if df.index[-1] >= today:
             continue   # 오늘 봉이 이미 확정(16시 이후 실행) — 잠정 봉 불필요·무해
         if code not in quotes:
-            # 레이트리밋 간격은 _KIS_GAP (주문 경로와 동일). 9종 x 1.1s ≈ 10s 로
-            # 15:20 창 안에 충분하다
-            for attempt in (1, 2):
-                try:
-                    time.sleep(_KIS_GAP)
-                    quotes[code] = kis.quote(code)
-                    break
-                except Exception as e:   # noqa: BLE001 — 종목별 독립 실패 처리
-                    if "EGW00201" in str(e) and attempt == 1:
-                        continue
-                    quotes[code] = {}
-                    print(f"  [WARN] {cand['name']} 시세 실패 — 건너뜀: {e}",
-                          file=sys.stderr)
+            quotes[code] = _fetch_quote(kis, code, cand["name"], quote_timeout)
+            if not quotes[code]:
+                failed.append(cand["name"])
         q = quotes[code]
         if not q:
             continue
@@ -398,7 +411,7 @@ def build_close_plan(today: pd.Timestamp | None = None) -> list[dict]:
                             "name": cand["name"], "strategy": strategy,
                             "qty": pos["qty"],
                             "note": f"청산 신호 — 종가 매도 (진입 {pos['date']})"})
-    return out
+    return out, failed
 
 
 def run_close_window(live_mock: bool = False, auto: bool = False) -> None:
@@ -430,9 +443,17 @@ def run_close_window(live_mock: bool = False, auto: bool = False) -> None:
     today = pd.Timestamp.today().strftime("%Y-%m-%d")
     now = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "live_mock" if live_mock else "dry_run"
-    plan = build_close_plan()
+    plan, failed = build_close_plan()
     print(f"=== Phase D 15:20 실행 창 ({mode}) — 계획 {len(plan)}건 ===")
     _submit_plan(plan, today, now, mode, live_mock)
+    if failed:
+        # 시세 실패 종목은 판정 자체가 안 된 것이라 '신호 없음'과 다르다 — 비정상
+        # 종료로 성공 스탬프를 막아 다음 슬롯이 재시도한다 (제출분은 당일 중복
+        # 차단으로 안전). 2026-09-08: 전부 실패가 "계획 0건" 정상 종료로 찍혀
+        # 재시도가 죽어 있었다.
+        print(f"[WARN] 시세 실패 {len(failed)}종 — {', '.join(failed)} → 비정상 종료 "
+              "(다음 슬롯 재시도, 제출분은 중복 차단)", file=sys.stderr)
+        raise SystemExit(2)
 
 
 def _liquidate_legacy(today: str, now: str) -> None:

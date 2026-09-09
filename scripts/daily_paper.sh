@@ -29,7 +29,14 @@ case "${1:-evening}" in
       echo "===== close window $(date '+%F %T') ====="
       # 15:20 실행 창 (2026-09-02): volbreak 트리거 도달·overnight 양봉 종가
       # 매수 + swing 청산 신호 종가 매도. 창 밖 실행은 파이썬 쪽 가드가 스킵.
-      "$PY" -m src.main trade --auto --close-window || echo "[WARN] close window failed"
+      # 실패(시세 조회 실패 포함)는 삼키지 않고 종료코드로 전파 — run_close_window.sh
+      # 가 스탬프를 안 찍어 다음 슬롯이 재시도한다 (2026-09-09: `|| echo` 가
+      # 실패를 삼켜 재시도 경로가 죽어 있었음). 제출분은 당일 중복 차단으로 안전.
+      "$PY" -m src.main trade --auto --close-window || {
+        rc=$?
+        echo "[WARN] close window failed (rc=$rc)"
+        exit "$rc"
+      }
     } >>"$LOG" 2>&1
     ;;
   evening)

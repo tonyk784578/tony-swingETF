@@ -90,13 +90,13 @@ class KIS:
 
     def _request(self, method: str, path: str, tr_id: str, *,
                  params: dict | None = None, body: dict | None = None,
-                 extra_headers: dict | None = None) -> dict:
+                 extra_headers: dict | None = None, timeout: float = 15) -> dict:
         for attempt in (1, 2):
             headers = self._headers(tr_id)
             if extra_headers:
                 headers.update(extra_headers)
             r = requests.request(method, f"{MOCK_BASE}{path}", headers=headers,
-                                 params=params, json=body, timeout=15)
+                                 params=params, json=body, timeout=timeout)
             try:
                 d = r.json()
             except ValueError as e:   # 게이트웨이 HTML 등 비JSON 응답 방어
@@ -131,8 +131,12 @@ class KIS:
         return {"cash": int(s.get("dnca_tot_amt", 0)),
                 "total": int(s.get("tot_evlu_amt", 0)), "holdings": holdings}
 
-    def quote(self, code: str) -> dict:
+    def quote(self, code: str, timeout: float = 15) -> dict:
         """현재가 시세 — 15:20 실행 창의 잠정 당일 봉 재료.
+
+        timeout: 15:20 창은 10여 분뿐이라 호출자가 짧게 준다 (config
+        ops.close_quote_timeout) — 15s 기본값으로 10종이 연속 실패하면 창을
+        통째로 넘긴다 (2026-09-08 실측).
 
         반환: {'price'(현재가), 'open', 'high', 'low'}. 휴장일에는 직전 거래일
         값이 그대로 오는데, 그 경우 후속 주문이 '장 운영시간 아님'으로 거절되어
@@ -141,7 +145,7 @@ class KIS:
         d = self._request("GET", "/uapi/domestic-stock/v1/quotations/inquire-price",
                           TR["quote"],
                           params={"FID_COND_MRKT_DIV_CODE": "J",
-                                  "FID_INPUT_ISCD": code})
+                                  "FID_INPUT_ISCD": code}, timeout=timeout)
         o = d.get("output", {})
         return {"price": float(o["stck_prpr"]), "open": float(o["stck_oprc"]),
                 "high": float(o["stck_hgpr"]), "low": float(o["stck_lwpr"])}

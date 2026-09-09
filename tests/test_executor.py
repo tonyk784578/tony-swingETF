@@ -6,9 +6,11 @@
 
 import pandas as pd
 
+from src import executor
 from src.etf_swing import simulate, simulate_overnight, simulate_volbreak
 from src.executor import (
     _close_action,
+    _fetch_quote,
     _order_paced,
     build_morning_sells,
     mock_positions,
@@ -182,3 +184,55 @@ def test_order_paced_retries_rate_limit_once(monkeypatch):
         raise AssertionError("리밋 외 오류는 재시도 없이 전파")
     except RuntimeError:
         assert k.calls == 1
+
+
+def test_fetch_quote_timeout_called_once(monkeypatch):
+    """리밋이 아닌 오류(타임아웃 등)는 재시도 없이 1회로 끝나야 한다.
+
+    2026-09-08: 탈출 없는 재시도 루프가 타임아웃을 두 번 호출해 종목당 30s+ 가
+    걸렸고 10종이 15:20 창을 넘겨 슬롯이 겹쳤다.
+    """
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+
+    class Q:
+        def __init__(self, errors):
+            self.errors, self.calls, self.timeouts = list(errors), 0, []
+
+        def quote(self, code, timeout=15):
+            self.calls += 1
+            self.timeouts.append(timeout)
+            if self.errors:
+                raise RuntimeError(self.errors.pop(0))
+            return {"price": 1.0, "open": 1.0, "high": 1.0, "low": 1.0}
+
+    k = Q(["Read timed out"])
+    assert _fetch_quote(k, "069500", "KODEX200", 5) == {}
+    assert k.calls == 1 and k.timeouts == [5]
+
+    k = Q(["KIS 오류 500/EGW00201: 초당 거래건수 초과"])   # 리밋만 1회 재시도
+    assert _fetch_quote(k, "069500", "KODEX200", 5)["price"] == 1.0
+    assert k.calls == 2
+
+    k = Q(["EGW00201", "EGW00201"])
+    assert _fetch_quote(k, "069500", "KODEX200", 5) == {}
+    assert k.calls == 2
+
+
+def test_close_window_quote_failure_exits_nonzero(monkeypatch, capsys):
+    """시세 실패가 있으면 제출은 하되 비정상 종료 — 스탬프가 안 찍혀 다음 슬롯이
+    재시도한다. 실패 0건이면 정상 종료."""
+    submitted = []
+    monkeypatch.setattr(executor, "_submit_plan",
+                        lambda plan, *a: submitted.append(plan))
+    monkeypatch.setattr(executor, "build_close_plan",
+                        lambda: ([{"action": "buy_close"}], ["KODEX_Lev"]))
+    try:
+        executor.run_close_window(live_mock=False, auto=False)
+        raise AssertionError("시세 실패는 SystemExit 이어야 한다")
+    except SystemExit as e:
+        assert e.code == 2
+    assert submitted == [[{"action": "buy_close"}]]   # 성공분은 제출됨
+    assert "시세 실패 1종" in capsys.readouterr().err
+
+    monkeypatch.setattr(executor, "build_close_plan", lambda: ([], []))
+    executor.run_close_window(live_mock=False, auto=False)   # 실패 없음 → 정상 종료
