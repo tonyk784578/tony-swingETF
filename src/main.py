@@ -430,6 +430,12 @@ def cmd_distcheck() -> None:
     run_dist_check()
 
 
+def cmd_imom() -> None:
+    from .imom import run_imom
+
+    run_imom()
+
+
 def cmd_fillcheck() -> None:
     from .fill_check import run_fill_check
 
@@ -557,7 +563,7 @@ def main() -> None:
                                  "etf", "portfolio", "refine", "crash", "rotation",
                                  "cost", "judge", "distcheck", "fillcheck", "mtest", "holdout",
                                  "sleeves", "xmarket", "trade", "daily", "brief",
-                                 "xdata", "xsection", "xaccess", "health", "all"])
+                                 "xdata", "xsection", "xaccess", "imom", "health", "all"])
     parser.add_argument("--force", action="store_true", help="ignore cache, re-download")
     parser.add_argument("--preview", action="store_true",
                         help="paper: 다음 거래일 조건 발동 여부 미리보기 (장부 기록 없음)")
@@ -603,6 +609,7 @@ def main() -> None:
         "xdata": lambda: cmd_xdata(args.force),
         "xsection": cmd_xsection,
         "xaccess": cmd_xaccess,
+        "imom": cmd_imom,
         "health": cmd_health,
     }
     if args.step == "all":
